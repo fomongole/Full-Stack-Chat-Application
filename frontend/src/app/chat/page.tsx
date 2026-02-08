@@ -7,14 +7,16 @@ import { getMessageDateLabel } from '@/lib/dateUtils';
 import { ChatHeader } from '@/components/chat/window/ChatHeader';
 import { MessageBubble } from '@/components/chat/window/MessageBubble';
 import { ChatInput } from '@/components/chat/window/ChatInput';
-import { Loader2 } from 'lucide-react';
+import { Loader2, ChevronDown } from 'lucide-react';
 
 export default function ChatPage() {
     const activeUser = useChatStore((state) => state.activeUser) as User | null;
     const {
         message, setMessage, chatHistory, isLoadingHistory, sendMessage,
         sendMediaMessage, deleteMessage, replyTo, setReplyTo,
-        isRemoteTyping, scrollRef, containerRef, isBlocked
+        isRemoteTyping, scrollRef, containerRef,
+        unreadBelowCount, scrollToBottom, handleScroll, // UPDATED
+        isBlocked
     } = useConversation(activeUser);
 
     if (!activeUser) return (
@@ -38,10 +40,10 @@ export default function ChatPage() {
                 <ChatHeader user={activeUser} isTyping={isRemoteTyping} />
             </div>
 
-            {/* MESSAGES: Connected containerRef here */}
             <div
                 ref={containerRef}
-                className="flex-1 overflow-y-auto relative z-0 custom-scrollbar overscroll-contain"
+                onScroll={handleScroll}
+                className="flex-1 overflow-y-auto relative z-0 custom-scrollbar overscroll-contain scroll-smooth"
             >
                 {isLoadingHistory ? (
                     <div className="flex flex-col items-center justify-center h-full space-y-4">
@@ -85,6 +87,21 @@ export default function ChatPage() {
                         })}
                         <div ref={scrollRef} className="h-1" />
                     </div>
+                )}
+
+                {/* UPDATED: FLOATING SCROLL BUTTON WITH COUNTER */}
+                {unreadBelowCount > 0 && (
+                    <button
+                        onClick={() => scrollToBottom('smooth')}
+                        className="fixed bottom-24 right-6 md:right-10 z-[40] bg-white dark:bg-[#202c33] text-primary p-3 rounded-full shadow-2xl border border-zinc-200 dark:border-zinc-700 hover:scale-110 active:scale-95 transition-all animate-in slide-in-from-bottom-4 fade-in duration-300 group"
+                    >
+                        <ChevronDown className="w-6 h-6" />
+
+                        {/* Red Badge for Counter */}
+                        <span className="absolute -top-2 -right-1 min-w-[22px] h-[22px] px-1 bg-red-500 text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-white dark:border-[#202c33] shadow-sm animate-in zoom-in duration-300">
+                            {unreadBelowCount > 99 ? '99+' : unreadBelowCount}
+                        </span>
+                    </button>
                 )}
             </div>
 

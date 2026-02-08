@@ -14,10 +14,12 @@ export const useConversation = (activeUser: User | null) => {
     const [replyTo, setReplyTo] = useState<Message | null>(null);
     const [isRemoteTyping, setIsRemoteTyping] = useState(false);
 
-    // REFS
-    const scrollRef = useRef<HTMLDivElement>(null);      // The dummy div at bottom
-    const containerRef = useRef<HTMLDivElement>(null);   // The actual scrollable container
-    const isInitialLoad = useRef(true);                 // Tracks if we just opened the chat
+    // NEW: Counter for messages arrived while scrolled up
+    const [unreadBelowCount, setUnreadBelowCount] = useState(0);
+
+    const scrollRef = useRef<HTMLDivElement>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
+    const isInitialLoad = useRef(true);
 
     const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const lastTypingEmitRef = useRef<number>(0);
@@ -35,11 +37,12 @@ export const useConversation = (activeUser: User | null) => {
     const isBlocked = activeUser?.hasBlocked || activeUser?.isBlockedBy;
 
     // ----------------------------------------------------
-    // PROFESSIONAL SCROLL LOGIC
+    // UPDATED SCROLL LOGIC WITH COUNTER
     // ----------------------------------------------------
     const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
         if (scrollRef.current) {
             scrollRef.current.scrollIntoView({ behavior });
+            setUnreadBelowCount(0); // Reset count when going to bottom
         }
     }, []);
 
@@ -47,31 +50,42 @@ export const useConversation = (activeUser: User | null) => {
         const container = containerRef.current;
         if (!container) return;
 
-        // 1. Initial Load: Snap instantly
         if (isInitialLoad.current) {
             scrollToBottom('auto');
             isInitialLoad.current = false;
             return;
         }
 
-        // 2. If I sent the message: Always scroll (smooth)
+        // If I sent the message, always scroll
         if (newMsgAuthorId === currentUser?.id) {
             scrollToBottom('smooth');
             return;
         }
 
-        // 3. If someone else sent it: Only scroll if I'm already at the bottom
-        // threshold of 100px allows for slight scrolling inaccuracy
-        const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+        const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150;
+
         if (isNearBottom) {
             scrollToBottom('smooth');
+        } else if (newMsgAuthorId && newMsgAuthorId !== currentUser?.id) {
+            // Increment counter if we are scrolled up and a message arrives from the other person
+            setUnreadBelowCount(prev => prev + 1);
         }
     }, [currentUser?.id, scrollToBottom]);
 
-    // Handle history loading & user switching
+    const handleScroll = useCallback(() => {
+        const container = containerRef.current;
+        if (!container) return;
+
+        const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+        if (isNearBottom) {
+            setUnreadBelowCount(0); // Clear count if user manually scrolls to the bottom
+        }
+    }, []);
+
     useEffect(() => {
         if (activeUser?.id) {
-            isInitialLoad.current = true; // Reset initial load flag when switching users
+            isInitialLoad.current = true;
+            setUnreadBelowCount(0);
         }
     }, [activeUser?.id]);
 
@@ -80,7 +94,6 @@ export const useConversation = (activeUser: User | null) => {
             handleAutoScroll(chatHistory[chatHistory.length - 1]?.authorId);
         }
     }, [chatHistory, isLoadingHistory, handleAutoScroll]);
-
 
     // ----------------------------------------------------
     // SOCKET LISTENERS
@@ -104,7 +117,6 @@ export const useConversation = (activeUser: User | null) => {
         const handleLoadHistory = (history: Message[]) => {
             setChatHistory(history);
             setIsLoadingHistory(false);
-            // Snap to bottom is handled by the useEffect watching chatHistory + isInitialLoad
         };
 
         const handleReceiveMessage = (newMessage: Message) => {
@@ -128,11 +140,7 @@ export const useConversation = (activeUser: User | null) => {
             setChatHistory(prev => prev.map(msg => msg.id === deletedMsg.id ? deletedMsg : msg));
         };
         const handleUserTyping = (data: { userId: string }) => {
-            if (data.userId === activeUserRef.current?.id) {
-                setIsRemoteTyping(true);
-                // Optional: scroll down if remote user starts typing and we are at bottom
-                handleAutoScroll();
-            }
+            if (data.userId === activeUserRef.current?.id) setIsRemoteTyping(true);
         };
         const handleUserStopTyping = (data: { userId: string }) => {
             if (data.userId === activeUserRef.current?.id) setIsRemoteTyping(false);
@@ -160,7 +168,7 @@ export const useConversation = (activeUser: User | null) => {
             socket.off("user_stop_typing", handleUserStopTyping);
             socket.off("messages_read", handleMessagesRead);
         };
-    }, [socket, activeUser?.id, handleAutoScroll]);
+    }, [socket, activeUser?.id]);
 
     // --- ACTIONS ---
     const sendMessage = (e?: React.FormEvent) => {
@@ -275,6 +283,9 @@ export const useConversation = (activeUser: User | null) => {
         isRemoteTyping,
         scrollRef,
         containerRef,
+        unreadBelowCount,     // UPDATED
+        scrollToBottom,
+        handleScroll,
         isBlocked
     };
 };
