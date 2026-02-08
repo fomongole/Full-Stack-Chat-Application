@@ -72,21 +72,37 @@ export const MessageBubble = memo(function MessageBubble({ message, isFromMe, is
             if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
         }
 
-        // Calculate swipe direction and amount (swipe right to reply, which is positive delta)
-        const delta = touchEndRef.current - touchStartRef.current;
-        if (delta > 0 && !message.isDeleted) { // Only allow swipe if not deleted
-            setSwipeTranslate(Math.min(delta, 80)); // Cap at 80px for feedback
+        // Calculate swipe direction and amount
+        let delta = touchEndRef.current - touchStartRef.current;
+        if (isFromMe) {
+            // For own messages (right-aligned): Swipe left (negative delta)
+            if (delta < 0 && !message.isDeleted) {
+                setSwipeTranslate(Math.max(delta, -80)); // Cap at -80px
+            }
+        } else {
+            // For other's messages (left-aligned): Swipe right (positive delta)
+            if (delta > 0 && !message.isDeleted) {
+                setSwipeTranslate(Math.min(delta, 80)); // Cap at 80px
+            }
         }
     };
 
     const handleTouchEnd = () => {
         if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
 
-        // Detect Swipe Right to Reply (>50px)
-        const delta = touchEndRef.current - touchStartRef.current;
-        if (delta > 50 && touchEndRef.current !== 0 && !message.isDeleted) {
-            onReply(message);
-            if (navigator.vibrate) navigator.vibrate(30);
+        // Detect Swipe to Reply (>50px in correct direction)
+        let delta = touchEndRef.current - touchStartRef.current;
+        const swipeThreshold = 50;
+        if (isFromMe) {
+            if (delta < -swipeThreshold && touchEndRef.current !== 0 && !message.isDeleted) {
+                onReply(message);
+                if (navigator.vibrate) navigator.vibrate(30);
+            }
+        } else {
+            if (delta > swipeThreshold && touchEndRef.current !== 0 && !message.isDeleted) {
+                onReply(message);
+                if (navigator.vibrate) navigator.vibrate(30);
+            }
         }
 
         // Animate back to 0

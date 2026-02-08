@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import {useState, useEffect, useRef, useCallback, useLayoutEffect} from 'react';
 import { useSocket } from '@/hooks/useSocket';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useChatStore } from '@/store/useChatStore';
@@ -28,8 +28,8 @@ export const useConversation = (activeUser: User | null) => {
     const activeUserRef = useRef(activeUser);
     const conversationIdRef = useRef(conversationId);
 
-    // Preserve scroll position for deletes
-    const scrollPositionBeforeDelete = useRef<number | null>(null);
+    // For delete scroll fix
+    const deleteAdjustment = useRef<{ oldHeight: number; oldScrollTop: number } | null>(null);
 
     useEffect(() => { activeUserRef.current = activeUser; }, [activeUser]);
     useEffect(() => { conversationIdRef.current = conversationId; }, [conversationId]);
@@ -47,7 +47,6 @@ export const useConversation = (activeUser: User | null) => {
         if (scrollRef.current) {
             scrollRef.current.scrollIntoView({ behavior });
             setUnreadBelowCount(0);
-            // Clear the set when we go to bottom to keep memory clean
             countedMessageIds.current.clear();
         }
     }, []);
@@ -67,8 +66,6 @@ export const useConversation = (activeUser: User | null) => {
             return;
         }
 
-        // Logic: If already at bottom, scroll. If not, we don't increment here
-        // because we moved that logic to the socket receiver for precision.
         const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150;
         if (isNearBottom) {
             scrollToBottom('smooth');
@@ -100,6 +97,19 @@ export const useConversation = (activeUser: User | null) => {
         }
     }, [chatHistory, isLoadingHistory, handleAutoScroll]);
 
+    // Fix for deletion scroll: Adjust after render
+    useLayoutEffect(() => {
+        const container = containerRef.current;
+        if (container && deleteAdjustment.current) {
+            const { oldHeight, oldScrollTop } = deleteAdjustment.current;
+            const newHeight = container.scrollHeight;
+            if (newHeight !== oldHeight && oldScrollTop > 0) {
+                container.scrollTop = oldScrollTop + (newHeight - oldHeight);
+            }
+            deleteAdjustment.current = null;
+        }
+    }, [chatHistory]); // Runs after every history update/render
+
     // ----------------------------------------------------
     // SOCKET LISTENERS
     // ----------------------------------------------------
@@ -125,21 +135,17 @@ export const useConversation = (activeUser: User | null) => {
         };
 
         const handleReceiveMessage = (newMessage: Message) => {
-            // 1. Update the chat UI
             setChatHistory((prev) => {
                 const filtered = prev.filter(m => !m.isLocal || (m.isLocal && m.attachmentUrl !== newMessage.attachmentUrl && m.id !== newMessage.id));
                 if (filtered.some(m => m.id === newMessage.id)) return filtered;
                 return [...filtered, newMessage];
             });
 
-            // 2. LOGIC: Should we increment the counter?
             const container = containerRef.current;
             const isFromOther = newMessage.authorId !== currentUser?.id;
 
             if (container && isFromOther) {
                 const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150;
-
-                // Only increment if we aren't at the bottom AND we haven't counted this ID yet
                 if (!isNearBottom && !countedMessageIds.current.has(newMessage.id)) {
                     setUnreadBelowCount(prev => prev + 1);
                     countedMessageIds.current.add(newMessage.id);
@@ -159,21 +165,16 @@ export const useConversation = (activeUser: User | null) => {
         const handleMessageDeleted = (deletedMsg: Message) => {
             const container = containerRef.current;
             if (container) {
-                // Save current scroll position before update
-                scrollPositionBeforeDelete.current = container.scrollTop;
+                // Save before update for useLayoutEffect
+                deleteAdjustment.current = {
+                    oldHeight: container.scrollHeight,
+                    oldScrollTop: container.scrollTop
+                };
             }
 
             setChatHistory(prev => prev.map(msg => msg.id === deletedMsg.id ? deletedMsg : msg));
-
-            // Restore scroll position after update
-            if (container && scrollPositionBeforeDelete.current !== null) {
-                const prevScrollTop = scrollPositionBeforeDelete.current;
-                // Adjust for potential height change after delete
-                const heightDiff = container.scrollHeight - (prevScrollTop + container.clientHeight);
-                container.scrollTop = prevScrollTop - heightDiff; // Maintain relative position
-                scrollPositionBeforeDelete.current = null;
-            }
         };
+
         const handleUserTyping = (data: { userId: string }) => {
             if (data.userId === activeUserRef.current?.id) setIsRemoteTyping(true);
         };
@@ -203,15 +204,14 @@ export const useConversation = (activeUser: User | null) => {
             socket.off("user_stop_typing", handleUserStopTyping);
             socket.off("messages_read", handleMessagesRead);
         };
-    }, [socket, activeUser?.id, currentUser?.id]); // Added currentUser.id to deps
+    }, [socket, activeUser?.id, currentUser?.id]);
 
-    // --- ACTIONS ---
+    // --- ACTIONS (unchanged) ---
     const sendMessage = (e?: React.FormEvent) => {
         if (e) e.preventDefault();
         if (isBlocked) return;
         if (!message.trim() || !socket || !activeUser || !conversationId) return;
 
-        // Optimistic update for text messages
         const tempId = uuidv4();
         const optimisticMessage: Message & { isLocal?: boolean } = {
             id: tempId,
@@ -231,12 +231,10 @@ export const useConversation = (activeUser: User | null) => {
         };
 
         setChatHistory(prev => [...prev, optimisticMessage]);
-        handleAutoScroll(currentUser?.id); // Scroll to bottom for own message
+        handleAutoScroll(currentUser?.id);
 
-        // Emit the message
         socket.emit("send_message", { conversationId, recipientId: activeUser.id, message, replyToId: replyTo?.id });
 
-        // Clear input and reply
         setMessage('');
         setReplyTo(null);
         socket.emit("stop_typing", { conversationId, recipientId: activeUser.id });
