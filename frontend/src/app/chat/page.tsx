@@ -16,7 +16,7 @@ export default function ChatPage() {
         sendMediaMessage, deleteMessage, replyTo, setReplyTo,
         isRemoteTyping, scrollRef, containerRef,
         unreadBelowCount, scrollToBottom, handleScroll,
-        isBlocked, isLoadingMore // ADDED FOR PAGINATION
+        isBlocked, isLoadingMore
     } = useConversation(activeUser);
 
     if (!activeUser) return (
