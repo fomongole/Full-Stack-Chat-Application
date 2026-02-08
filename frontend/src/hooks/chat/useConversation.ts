@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react';
+import {useState, useEffect, useRef, useCallback, useLayoutEffect} from 'react';
 import { useSocket } from '@/hooks/useSocket';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useChatStore } from '@/store/useChatStore';
@@ -30,7 +30,6 @@ export const useConversation = (activeUser: User | null) => {
 
     // For delete scroll fix
     const deleteAdjustment = useRef<{ oldHeight: number; oldScrollTop: number } | null>(null);
-    const resizeTimeout = useRef<NodeJS.Timeout | null>(null);
 
     useEffect(() => { activeUserRef.current = activeUser; }, [activeUser]);
     useEffect(() => { conversationIdRef.current = conversationId; }, [conversationId]);
@@ -104,38 +103,12 @@ export const useConversation = (activeUser: User | null) => {
         if (container && deleteAdjustment.current) {
             const { oldHeight, oldScrollTop } = deleteAdjustment.current;
             const newHeight = container.scrollHeight;
-            const heightDiff = newHeight - oldHeight;
-            // Only adjust if shrunk (deletion) and not at top, with threshold for minor diffs
-            if (heightDiff < -5 && oldScrollTop > 0) {
-                // Use RAF for desktop safety (post-paint if needed)
-                requestAnimationFrame(() => {
-                    container.scrollTop = oldScrollTop + heightDiff;
-                    console.log('Scroll adjusted:', { oldScrollTop, heightDiff, newScrollTop: container.scrollTop }); // Debug log - remove later
-                });
+            if (newHeight !== oldHeight && oldScrollTop > 0) {
+                container.scrollTop = oldScrollTop + (newHeight - oldHeight);
             }
             deleteAdjustment.current = null;
         }
     }, [chatHistory]); // Runs after every history update/render
-
-    // Handle resize (for minimized windows) - debounce re-adjust if pending
-    useEffect(() => {
-        const handleResize = () => {
-            if (resizeTimeout.current) clearTimeout(resizeTimeout.current);
-            resizeTimeout.current = setTimeout(() => {
-                const container = containerRef.current;
-                if (container && deleteAdjustment.current) {
-                    // Re-trigger adjustment on resize if deletion pending
-                    const { oldHeight, oldScrollTop } = deleteAdjustment.current;
-                    const newHeight = container.scrollHeight;
-                    if (newHeight !== oldHeight) {
-                        container.scrollTop = oldScrollTop + (newHeight - oldHeight);
-                    }
-                }
-            }, 100); // Debounce 100ms
-        };
-        window.addEventListener('resize', handleResize);
-        return () => window.removeEventListener('resize', handleResize);
-    }, []);
 
     // ----------------------------------------------------
     // SOCKET LISTENERS
@@ -197,7 +170,6 @@ export const useConversation = (activeUser: User | null) => {
                     oldHeight: container.scrollHeight,
                     oldScrollTop: container.scrollTop
                 };
-                console.log('Pre-delete:', { oldHeight: container.scrollHeight, oldScrollTop: container.scrollTop }); // Debug log - remove later
             }
 
             setChatHistory(prev => prev.map(msg => msg.id === deletedMsg.id ? deletedMsg : msg));
