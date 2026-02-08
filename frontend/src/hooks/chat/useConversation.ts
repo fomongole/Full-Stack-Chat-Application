@@ -10,6 +10,11 @@ export const useConversation = (activeUser: User | null) => {
     const [message, setMessage] = useState('');
     const [chatHistory, setChatHistory] = useState<(Message & { isLocal?: boolean })[]>([]);
     const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
+    // PAGINATION STATES
+    const [hasMore, setHasMore] = useState(false);
+    const [isLoadingMore, setIsLoadingMore] = useState(false);
+
     const [conversationId, setConversationId] = useState<string | null>(null);
     const [replyTo, setReplyTo] = useState<Message | null>(null);
     const [isRemoteTyping, setIsRemoteTyping] = useState(false);
@@ -75,22 +80,37 @@ export const useConversation = (activeUser: User | null) => {
         }
     }, [currentUser?.id, scrollToBottom]);
 
+    const loadMoreMessages = useCallback(() => {
+        if (!socket || !conversationId || !hasMore || isLoadingMore || chatHistory.length === 0) return;
+
+        setIsLoadingMore(true);
+        // We use the ID of the top-most (oldest) message as our cursor
+        const oldestMessageId = chatHistory[0].id;
+        socket.emit("load_more_messages", { conversationId, cursor: oldestMessageId });
+    }, [socket, conversationId, hasMore, isLoadingMore, chatHistory]);
+
     const handleScroll = useCallback(() => {
         const container = containerRef.current;
         if (!container) return;
+
+        // PAGINATION TRIGGER: User scrolls near the top (50px threshold)
+        if (container.scrollTop < 50 && hasMore && !isLoadingMore) {
+            loadMoreMessages();
+        }
 
         const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
         if (isNearBottom) {
             setUnreadBelowCount(0);
             countedMessageIds.current.clear();
         }
-    }, []);
+    }, [hasMore, isLoadingMore, loadMoreMessages]);
 
     useEffect(() => {
         if (activeUser?.id) {
             isInitialLoad.current = true;
             setUnreadBelowCount(0);
             countedMessageIds.current.clear();
+            setHasMore(false); // Reset pagination for new conversation
         }
     }, [activeUser?.id]);
 
@@ -101,10 +121,10 @@ export const useConversation = (activeUser: User | null) => {
             return;
         }
 
-        if (!isLoadingHistory && chatHistory.length > 0) {
+        if (!isLoadingHistory && !isLoadingMore && chatHistory.length > 0) {
             handleAutoScroll(chatHistory[chatHistory.length - 1]?.authorId);
         }
-    }, [chatHistory, isLoadingHistory, handleAutoScroll]);
+    }, [chatHistory, isLoadingHistory, isLoadingMore, handleAutoScroll]);
 
     // Fix for deletion scroll: Adjust after render
     useLayoutEffect(() => {
@@ -140,9 +160,26 @@ export const useConversation = (activeUser: User | null) => {
             });
         };
 
-        const handleLoadHistory = (history: Message[]) => {
-            setChatHistory(history);
+        const handleLoadHistory = (data: { messages: Message[], hasMore: boolean }) => {
+            setChatHistory(data.messages);
+            setHasMore(data.hasMore);
             setIsLoadingHistory(false);
+        };
+
+        const handleMoreMessagesLoaded = (data: { messages: Message[], hasMore: boolean }) => {
+            const container = containerRef.current;
+            const previousScrollHeight = container?.scrollHeight || 0;
+
+            setChatHistory(prev => [...data.messages, ...prev]);
+            setHasMore(data.hasMore);
+            setIsLoadingMore(false);
+
+            // SCROLL ANCHORING: Keep the user's view fixed while prepending messages
+            requestAnimationFrame(() => {
+                if (container) {
+                    container.scrollTop = container.scrollHeight - previousScrollHeight;
+                }
+            });
         };
 
         const handleReceiveMessage = (newMessage: Message) => {
@@ -204,6 +241,7 @@ export const useConversation = (activeUser: User | null) => {
 
         socket.on("conversation_joined", handleConversationJoined);
         socket.on("load_history", handleLoadHistory);
+        socket.on("more_messages_loaded", handleMoreMessagesLoaded);
         socket.on("receive_message", handleReceiveMessage);
         socket.on("message_deleted", handleMessageDeleted);
         socket.on("user_typing", handleUserTyping);
@@ -213,6 +251,7 @@ export const useConversation = (activeUser: User | null) => {
         return () => {
             socket.off("conversation_joined", handleConversationJoined);
             socket.off("load_history", handleLoadHistory);
+            socket.off("more_messages_loaded", handleMoreMessagesLoaded);
             socket.off("receive_message", handleReceiveMessage);
             socket.off("message_deleted", handleMessageDeleted);
             socket.off("user_typing", handleUserTyping);
@@ -304,6 +343,7 @@ export const useConversation = (activeUser: User | null) => {
         message, setMessage: handleTyping, chatHistory, isLoadingHistory,
         sendMessage, sendMediaMessage, deleteMessage, replyTo, setReplyTo,
         isRemoteTyping, scrollRef, containerRef, unreadBelowCount,
-        scrollToBottom, handleScroll, isBlocked
+        scrollToBottom, handleScroll, isBlocked,
+        isLoadingMore
     };
 };

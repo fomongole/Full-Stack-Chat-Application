@@ -152,12 +152,21 @@ export class ChatService {
         return this.formatMessage(deletedMessage);
     }
 
-    async getConversationHistory(conversationId: string, limit = 50) {
+    /**
+     * PAGINATED HISTORY FETCHING (Optimized)
+     * Fetches the latest N messages relative to a cursor.
+     */
+    async getConversationHistory(conversationId: string, limit = 50, cursor?: string) {
         // OPTIMIZATION:
-        // Uses the @@index([conversationId, createdAt]) defined in schema
+        // Uses the @@index([conversationId, createdAt(sort: Desc)]) defined in schema
         const messages = await prisma.message.findMany({
             where: { conversationId },
             take: limit,
+            // If cursor exists, we skip the cursor itself and fetch the messages before it
+            ...(cursor && {
+                skip: 1,
+                cursor: { id: cursor },
+            }),
             orderBy: { createdAt: 'desc' },
             select: {
                 id: true,
@@ -180,10 +189,15 @@ export class ChatService {
             }
         });
 
-        // Reversing the array.
-        // We fetched [Newest -> Oldest] for the DB query,
-        // but the UI expects [Oldest -> Newest] to render top-to-bottom.
-        return messages.reverse().map(msg => this.formatMessage(msg));
+        // Format and reverse back to chronological for the UI
+        const formatted = messages.map(msg => this.formatMessage(msg)).reverse();
+
+        return {
+            messages: formatted,
+            hasMore: messages.length === limit,
+            // The last item in the 'desc' array is the oldest message in this batch
+            nextCursor: messages.length > 0 ? messages[messages.length - 1].id : null
+        };
     }
 
     async markMessagesAsRead(conversationId: string, currentUserId: string) {

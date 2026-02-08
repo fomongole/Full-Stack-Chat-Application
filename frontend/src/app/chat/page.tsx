@@ -15,8 +15,8 @@ export default function ChatPage() {
         message, setMessage, chatHistory, isLoadingHistory, sendMessage,
         sendMediaMessage, deleteMessage, replyTo, setReplyTo,
         isRemoteTyping, scrollRef, containerRef,
-        unreadBelowCount, scrollToBottom, handleScroll, // UPDATED
-        isBlocked
+        unreadBelowCount, scrollToBottom, handleScroll,
+        isBlocked, isLoadingMore // ADDED FOR PAGINATION
     } = useConversation(activeUser);
 
     if (!activeUser) return (
@@ -52,6 +52,14 @@ export default function ChatPage() {
                     </div>
                 ) : (
                     <div className="p-4 md:px-8 md:py-4 space-y-1 pb-4">
+
+                        {/* PAGINATION LOADER: Shows when user scrolls to top to load more */}
+                        {isLoadingMore && (
+                            <div className="flex justify-center py-4">
+                                <Loader2 className="w-6 h-6 text-primary animate-spin opacity-60" />
+                            </div>
+                        )}
+
                         {chatHistory.map((msg, i) => {
                             const isFromMe = msg.username !== activeUser.username;
                             const previousMsg = chatHistory[i - 1];

@@ -38,11 +38,21 @@ export const registerChatHandlers = (io: Server, socket: Socket) => {
             socket.join(conversation.id);
             socket.emit("conversation_joined", { conversationId: conversation.id });
 
-            // Fetch history efficiently
-            const history = await chatService.getConversationHistory(conversation.id);
-            socket.emit("load_history", history);
+            // Initial History Fetch (Top 50 latest)
+            const historyData = await chatService.getConversationHistory(conversation.id);
+            socket.emit("load_history", historyData);
         } catch (error) {
             console.error("Join Error:", error);
+        }
+    });
+
+    // Handle fetching older messages via cursor
+    socket.on("load_more_messages", async (data: { conversationId: string, cursor: string }) => {
+        try {
+            const historyData = await chatService.getConversationHistory(data.conversationId, 50, data.cursor);
+            socket.emit("more_messages_loaded", historyData);
+        } catch (error) {
+            console.error("Pagination Error:", error);
         }
     });
 

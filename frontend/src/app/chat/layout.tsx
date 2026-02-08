@@ -29,7 +29,6 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
     };
 
     return (
-        // FIX: strict fixed height and position to prevent mobile browser scroll bounce
         <div className="fixed inset-0 h-[100dvh] w-full flex overflow-hidden bg-white dark:bg-black touch-none overscroll-none">
 
             {/* SIDEBAR */}
