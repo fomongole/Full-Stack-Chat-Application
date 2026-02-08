@@ -94,7 +94,6 @@ export const useConversation = (activeUser: User | null) => {
         }
     }, [activeUser?.id]);
 
-    // --- FIX APPLIED HERE ---
     useEffect(() => {
         // If this update was caused by a deletion, DO NOT auto-scroll.
         if (isDeletingRef.current) {
@@ -222,7 +221,7 @@ export const useConversation = (activeUser: User | null) => {
         };
     }, [socket, activeUser?.id, currentUser?.id]);
 
-    // --- ACTIONS (unchanged) ---
+    // --- ACTIONS ---
     const sendMessage = (e?: React.FormEvent) => {
         if (e) e.preventDefault();
         if (isBlocked) return;
