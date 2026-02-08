@@ -6,6 +6,7 @@ import { api } from '@/lib/api';
 import { SidebarHeader } from './sidebar/SidebarHeader';
 import { SidebarUserItem } from './sidebar/SidebarUserItem';
 import { SidebarFooter } from './sidebar/SidebarFooter';
+import { UserPlus, Search } from 'lucide-react';
 
 interface ChatSidebarProps {
     users: User[];
@@ -49,12 +50,12 @@ export default function ChatSidebar({ users, isLoading, onProfileClick, onLogout
         <aside className="w-full border-r border-zinc-200 dark:border-zinc-800 flex flex-col bg-zinc-50/50 dark:bg-zinc-900/10 h-full">
             <SidebarHeader onSearch={handleSearch} />
 
-            <div className="flex-1 overflow-y-auto p-3 space-y-1">
+            <div className="flex-1 overflow-y-auto p-3 space-y-1 custom-scrollbar">
                 <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest px-3 mb-2">
                     {searchQuery ? "Search Results" : "Direct Messages"}
                 </p>
 
-                {/* SKELETON LOADING STATE */}
+                {/* LOADING STATE */}
                 {isLoading && !searchQuery ? (
                     [...Array(5)].map((_, i) => (
                         <div key={i} className="flex items-center gap-3 p-3 rounded-xl animate-pulse">
@@ -66,8 +67,33 @@ export default function ChatSidebar({ users, isLoading, onProfileClick, onLogout
                         </div>
                     ))
                 ) : displayUsers.length === 0 ? (
-                    <div className="text-center text-zinc-400 text-sm py-8">
-                        {isSearching ? "Searching..." : "No users found"}
+                    <div className="flex flex-col items-center justify-center pt-10 pb-6 px-4 text-center opacity-70">
+                        {searchQuery ? (
+                            // Case 1: Search returned no results
+                            <div className="space-y-3 animate-in fade-in zoom-in duration-300">
+                                <div className="bg-zinc-100 dark:bg-zinc-800/50 p-3 rounded-full inline-block">
+                                    <Search className="w-6 h-6 text-zinc-400" />
+                                </div>
+                                <p className="text-sm text-zinc-500">
+                                    No users found for <span className="font-semibold">"{searchQuery}"</span>
+                                </p>
+                            </div>
+                        ) : (
+                            // Case 2: New User (No chats yet) -> Directive Message
+                            <div className="flex flex-col items-center gap-3 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                                <div className="p-4 bg-primary/10 dark:bg-primary/20 rounded-full">
+                                    <UserPlus className="w-8 h-8 text-primary" />
+                                </div>
+                                <div className="space-y-1">
+                                    <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-200">
+                                        Start a Conversation
+                                    </h3>
+                                    <p className="text-xs text-zinc-500 max-w-[200px] leading-relaxed mx-auto">
+                                        Your inbox is empty. Search for colleagues above to start chatting.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 ) : (
                     displayUsers.map((user) => (
