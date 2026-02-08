@@ -8,7 +8,7 @@ import { prisma } from './config/prisma';
 
 const httpServer = http.createServer(app);
 
-// Initialize Socket.io with CORS allowing all origins
+// Initializing Socket.io with CORS allowing all origins
 const io = new Server(httpServer, {
     cors: { origin: "*" }
 });
@@ -29,7 +29,7 @@ io.on("connection", async (socket) => {
     const userId = (socket as any).user.id;
 
     /**
-     * CRITICAL: Personal Notification Channel
+     * Personal Notification Channel
      * We join a room named after the User's ID.
      * This allows us to target this specific user from anywhere in the app
      * (e.g., "io.to(recipientId).emit(...)") even if we don't know their socket ID.

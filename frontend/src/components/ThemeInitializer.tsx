@@ -1,14 +1,20 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useConfigStore } from '@/store/useConfigStore';
+import { useConfigStore, THEME_COLORS } from '@/store/useConfigStore';
 
 export function ThemeInitializer() {
-    const primaryColor = useConfigStore((state) => state.primaryColor);
+    // 1. Get the ID from the store
+    const primaryColorId = useConfigStore((state) => state.primaryColorId);
 
     useEffect(() => {
-        document.documentElement.style.setProperty('--primary-color', primaryColor);
-    }, [primaryColor]);
+        // 2. Find the matching theme object
+        const theme = THEME_COLORS.find(t => t.id === primaryColorId) || THEME_COLORS[0];
+
+        // 3. Inject the HSL channels into the CSS variable
+        document.documentElement.style.setProperty('--primary', theme.hsl);
+
+    }, [primaryColorId]);
 
     return null;
 }

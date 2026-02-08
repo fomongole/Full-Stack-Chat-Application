@@ -1,12 +1,18 @@
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/app.error';
 
+interface SendMessageParams {
+    userId: string;
+    conversationId: string;
+    content?: string;
+    replyToId?: string;
+    attachmentUrl?: string;
+    messageType?: 'TEXT' | 'IMAGE' | 'VIDEO';
+}
+
 export class ChatService {
-    /**
-     * Finds or Creates a 1-on-1 Conversation.
-     * Uses strict AND logic to prevent duplicate conversations between same 2 users.
-     */
     async getOrCreateConversation(user1Id: string, user2Id: string) {
+        // Optimization: Check for existing convo using findFirst (uses implicit index on relations)
         let conversation = await prisma.conversation.findFirst({
             where: {
                 AND: [
@@ -14,7 +20,7 @@ export class ChatService {
                     { participants: { some: { id: user2Id } } }
                 ]
             },
-            include: { participants: true }
+            select: { id: true } // Only need ID initially
         });
 
         if (!conversation) {
@@ -24,35 +30,77 @@ export class ChatService {
                         connect: [{ id: user1Id }, { id: user2Id }]
                     }
                 },
-                include: { participants: true }
+                select: { id: true }
             });
         }
         return conversation;
     }
 
-    /**
-     * Handles message creation securely.
-     * * ATOMIC TRANSACTION:
-     * We wrap message creation and conversation update in a $transaction.
-     * Why? To ensure the Conversation's 'updatedAt' field ALWAYS reflects the latest message time.
-     * This is crucial for sorting the sidebar correctly.
-     */
-    async processPrivateMessage(userId: string, conversationId: string, content: string, replyToId?: string) {
+    async processPrivateMessage(params: SendMessageParams) {
+        const { userId, conversationId, content, replyToId, attachmentUrl, messageType = 'TEXT' } = params;
+
+        // 1. Security & Existence Check (Optimized Select)
+        const conversation = await prisma.conversation.findUnique({
+            where: { id: conversationId },
+            include: {
+                participants: {
+                    select: { id: true } // Not fetching full user objects
+                }
+            }
+        });
+
+        if (!conversation) throw new AppError("Conversation not found", 404);
+
+        const recipient = conversation.participants.find(p => p.id !== userId);
+
+        // Block Check (Optimized using count instead of findFirst to avoid fetching object)
+        if (recipient) {
+            const blockCount = await prisma.block.count({
+                where: {
+                    OR: [
+                        { blockerId: recipient.id, blockedId: userId },
+                        { blockerId: userId, blockedId: recipient.id }
+                    ]
+                }
+            });
+
+            if (blockCount > 0) {
+                throw new AppError("Message cannot be sent. Block restriction active.", 403);
+            }
+        }
+
+        // 2. Transaction: Create Message & Update Conversation timestamp
         const [newMessage] = await prisma.$transaction([
-            // 1. Create the message
             prisma.message.create({
                 data: {
-                    content,
-                    author: { connect: { id: userId } },
-                    conversation: { connect: { id: conversationId } },
-                    ...(replyToId && { replyTo: { connect: { id: replyToId } } })
+                    content: content || "",
+                    authorId: userId,
+                    conversationId: conversationId,
+                    messageType,
+                    attachmentUrl,
+                    replyToId: replyToId
                 },
-                include: {
+                // Lean Select for the returned message
+                select: {
+                    id: true,
+                    content: true,
+                    createdAt: true,
+                    isRead: true,
+                    isDeleted: true,
+                    messageType: true,
+                    attachmentUrl: true,
+                    conversationId: true,
                     author: { select: { id: true, username: true, image: true } },
-                    replyTo: { select: { id: true, content: true, author: { select: { username: true } } } }
+                    replyTo: {
+                        select: {
+                            id: true,
+                            content: true,
+                            messageType: true,
+                            author: { select: { username: true } }
+                        }
+                    }
                 }
             }),
-            // 2. Update conversation timestamp (Trigger for "Recent Chats" sort order)
             prisma.conversation.update({
                 where: { id: conversationId },
                 data: { updatedAt: new Date() }
@@ -63,21 +111,41 @@ export class ChatService {
     }
 
     async deleteMessage(userId: string, messageId: string) {
-        const message = await prisma.message.findUnique({ where: { id: messageId } });
+        // Safety check
+        const message = await prisma.message.findUnique({
+            where: { id: messageId },
+            select: { authorId: true }
+        });
 
         if (!message) throw new AppError("Message not found", 404);
         if (message.authorId !== userId) throw new AppError("You can only delete your own messages", 403);
 
-        // Soft Delete: We keep the record but hide content
         const deletedMessage = await prisma.message.update({
             where: { id: messageId },
             data: {
                 isDeleted: true,
-                content: "This message was deleted"
+                content: "This message was deleted",
+                attachmentUrl: null,
+                messageType: "TEXT"
             },
-            include: {
+            select: {
+                id: true,
+                content: true,
+                createdAt: true,
+                isRead: true,
+                isDeleted: true,
+                messageType: true,
+                attachmentUrl: true,
+                conversationId: true,
                 author: { select: { id: true, username: true, image: true } },
-                replyTo: { select: { id: true, content: true, author: { select: { username: true } } } }
+                replyTo: {
+                    select: {
+                        id: true,
+                        content: true,
+                        messageType: true,
+                        author: { select: { username: true } }
+                    }
+                }
             }
         });
 
@@ -85,13 +153,30 @@ export class ChatService {
     }
 
     async getConversationHistory(conversationId: string, limit = 50) {
+        // OPTIMIZATION:
+        // Uses the @@index([conversationId, createdAt]) defined in schema
         const messages = await prisma.message.findMany({
             where: { conversationId },
             take: limit,
-            orderBy: { createdAt: 'asc' }, // Oldest first for chat window
-            include: {
+            orderBy: { createdAt: 'asc' }, // Index optimized sort
+            select: {
+                id: true,
+                content: true,
+                createdAt: true,
+                isRead: true,
+                isDeleted: true,
+                messageType: true,
+                attachmentUrl: true,
+                conversationId: true,
                 author: { select: { id: true, username: true, image: true } },
-                replyTo: { select: { id: true, content: true, author: { select: { username: true } } } }
+                replyTo: {
+                    select: {
+                        id: true,
+                        content: true,
+                        messageType: true,
+                        author: { select: { username: true } }
+                    }
+                }
             }
         });
 
@@ -99,18 +184,19 @@ export class ChatService {
     }
 
     async markMessagesAsRead(conversationId: string, currentUserId: string) {
+        // Uses @@index([conversationId, isRead])
         await prisma.message.updateMany({
             where: {
                 conversationId: conversationId,
                 isRead: false,
-                authorId: { not: currentUserId } // Only mark OTHER people's messages as read
+                authorId: { not: currentUserId }
             },
             data: { isRead: true }
         });
     }
 
-    // Standardizer for message objects sent to frontend
     private formatMessage(msg: any) {
+        // Helper to keep formatting consistent
         return {
             id: msg.id,
             conversationId: msg.conversationId,
@@ -118,13 +204,16 @@ export class ChatService {
             authorId: msg.author.id,
             image: msg.author.image,
             message: msg.isDeleted ? "This message was deleted" : msg.content,
+            messageType: msg.messageType,
+            attachmentUrl: msg.attachmentUrl,
             isDeleted: msg.isDeleted,
             isRead: msg.isRead,
             timestamp: msg.createdAt,
             replyTo: msg.replyTo ? {
                 id: msg.replyTo.id,
                 username: msg.replyTo.author.username,
-                content: msg.replyTo.isDeleted ? "Message deleted" : msg.replyTo.content
+                content: msg.replyTo.isDeleted ? "Message deleted" : msg.replyTo.content,
+                messageType: msg.replyTo.messageType
             } : null
         };
     }

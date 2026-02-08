@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import authRoutes from './routes/auth.routes';
-import userRoutes from './routes/user.routes'; // Import this
+import userRoutes from './routes/user.routes';
 import { globalErrorHandler } from './middlewares/error.middleware';
 import { notFoundMiddleware } from './middlewares/not-found.middleware';
 

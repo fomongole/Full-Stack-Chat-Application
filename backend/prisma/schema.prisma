@@ -17,10 +17,16 @@ model User {
   image     String?
   isOnline  Boolean  @default(false)
   lastSeen  DateTime @default(now())
+  isPrivate Boolean  @default(false)
 
   messages      Message[]
   conversations Conversation[] @relation("UserConversations")
-  isPrivate     Boolean        @default(false)
+
+  blockedUsers Block[] @relation("Blocker")
+  blockedBy    Block[] @relation("Blocked")
+
+  // Index for searching users by username/email
+  @@index([username, email])
 }
 
 model Conversation {
@@ -30,11 +36,14 @@ model Conversation {
 
   messages     Message[]
   participants User[]    @relation("UserConversations")
+
+  // Critical for sorting the sidebar by "most recent activity"
+  @@index([updatedAt(sort: Desc)])
 }
 
 model Message {
   id             String   @id @default(uuid())
-  content        String
+  content        String?
   createdAt      DateTime @default(now())
   authorId       String
   conversationId String
@@ -42,11 +51,41 @@ model Message {
   isRead    Boolean @default(false)
   isDeleted Boolean @default(false)
 
-  // Reply Functionality
+  messageType   MessageType @default(TEXT)
+  attachmentUrl String?
+
   replyToId String?
   replyTo   Message?  @relation("ReplyRelation", fields: [replyToId], references: [id])
   replies   Message[] @relation("ReplyRelation")
 
   author       User         @relation(fields: [authorId], references: [id])
   conversation Conversation @relation(fields: [conversationId], references: [id])
+
+  // COMPOUND INDEXES (Enterprise Optimization)
+  // 1. Instantly fetch history for a specific chat, ordered by time
+  @@index([conversationId, createdAt(sort: Desc)])
+  // 2. Instantly count unread messages for a specific user in a specific chat
+  @@index([conversationId, isRead])
+}
+
+model Block {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  blockerId String
+  blockedId String
+
+  blocker User @relation("Blocker", fields: [blockerId], references: [id])
+  blocked User @relation("Blocked", fields: [blockedId], references: [id])
+
+  @@unique([blockerId, blockedId])
+  // Speeds up "Am I blocked?" checks
+  @@index([blockerId])
+  @@index([blockedId])
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
 }

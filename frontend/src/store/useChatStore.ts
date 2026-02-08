@@ -3,7 +3,8 @@ import { User } from '@/types';
 
 interface ChatState {
     activeUser: User | null;
-    setActiveUser: (user: User) => void;
+    // Allow 'null' to support closing chat on mobile
+    setActiveUser: (user: User | null) => void;
 }
 
 export const useChatStore = create<ChatState>((set) => ({

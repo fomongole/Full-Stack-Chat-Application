@@ -2,7 +2,7 @@ import { Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import { env } from '../config/env';
 import { AppError } from '../utils/app.error';
-import { Request, Response, NextFunction } from "express"; // Import Response here!
+import { Response, NextFunction } from "express";
 
 export const authMiddleware = (socket: Socket, next: (err?: any) => void) => {
     const token = socket.handshake.auth.token;

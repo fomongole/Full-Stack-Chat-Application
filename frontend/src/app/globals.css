@@ -1,12 +1,13 @@
 @import "tailwindcss";
 
-/* This forces Tailwind to use the "class" strategy.
-   It tells Tailwind to only apply dark styles if the ".dark" class is present.
-*/
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme inline {
-  --color-primary: var(--primary-color);
+  /* TAILWIND V4 CONFIGURATION
+     We wrap the variable in hsl() so Tailwind can apply opacity modifiers
+     like text-primary/50 automatically.
+  */
+  --color-primary: hsl(var(--primary));
   --color-primary-foreground: white;
 
   /* Modern Neutral Grays */
@@ -17,12 +18,12 @@
 :root {
   --background: #ffffff;
   --foreground: #09090b;
-  --primary-color: #2563eb; /* Corporate Blue */
+
+  /* DEFAULT THEME (Blue) - HSL Channels */
+  /* This matches '217 91% 60%' from your store default */
+  --primary: 217 91% 60%;
 }
 
-/* This matches the "attribute='class'" setting in your ThemeProvider.
-   When next-themes adds this class, these variables activate.
-*/
 .dark {
   --background: #09090b;
   --foreground: #fafafa;

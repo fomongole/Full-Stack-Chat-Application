@@ -2,18 +2,18 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/useAuthStore';
+import { useChatStore } from '@/store/useChatStore';
 import { useSocket } from '@/hooks/useSocket';
 import { useChatList } from '@/hooks/chat/useChatList';
 import { User } from '@/types';
-
-// Components
 import ChatSidebar from '@/components/chat/ChatSidebar';
-import EditProfileModal from '@/components/EditProfileModal';
-import LogoutModal from '@/components/LogoutModal';
-import UserProfileModal from '@/components/UserProfileModal';
+import EditProfileModal from '@/components/modals/EditProfileModal';
+import LogoutModal from '@/components/modals/LogoutModal';
+import UserProfileModal from '@/components/modals/UserProfileModal';
 
 export default function ChatLayout({ children }: { children: React.ReactNode }) {
-    const { users } = useChatList();
+    const { users, isLoading } = useChatList();
+    const activeUser = useChatStore((state) => state.activeUser);
 
     const [isProfileOpen, setIsProfileOpen] = useState(false);
     const [isLogoutOpen, setIsLogoutOpen] = useState(false);
@@ -30,16 +30,39 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
     };
 
     return (
-        <div className="flex h-screen overflow-hidden bg-white dark:bg-zinc-950">
-            <ChatSidebar
-                users={users}
-                onProfileClick={() => setIsProfileOpen(true)}
-                onLogoutClick={() => setIsLogoutOpen(true)}
-                onViewUser={(user) => setViewingUser(user)}
-            />
+        <div className="flex h-[100dvh] overflow-hidden bg-white dark:bg-black">
+            {/* SIDEBAR:
+               - Desktop (md+): Always visible (w-[380px])
+               - Mobile: Visible ONLY if no active user is selected
+            */}
+            <div className={`
+                ${activeUser ? 'hidden md:flex' : 'flex'} 
+                w-full md:w-[380px] flex-col bg-white dark:bg-[#111b21] z-20
+            `}>
+                <ChatSidebar
+                    users={users}
+                    isLoading={isLoading}
+                    onProfileClick={() => setIsProfileOpen(true)}
+                    onLogoutClick={() => setIsLogoutOpen(true)}
+                    onViewUser={(user) => setViewingUser(user)}
+                />
+            </div>
 
-            <main className="flex-1 flex flex-col relative">{children}</main>
+            {/* MAIN CHAT AREA:
+               - Desktop: Always visible
+               - Mobile: Visible ONLY if active user is selected
+            */}
+            <main className={`
+                ${activeUser ? 'flex' : 'hidden md:flex'} 
+                flex-1 flex-col relative bg-[#efeae2] dark:bg-[#0b141a]
+            `}>
+                {/* Background Pattern Layer (WhatsApp Style) */}
+                <div className="absolute inset-0 opacity-[0.06] dark:opacity-[0.03] pointer-events-none bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')]"></div>
 
+                {children}
+            </main>
+
+            {/* Modals */}
             <EditProfileModal isOpen={isProfileOpen} onClose={() => setIsProfileOpen(false)} />
             <UserProfileModal isOpen={!!viewingUser} user={viewingUser} onClose={() => setViewingUser(null)} />
             <LogoutModal isOpen={isLogoutOpen} onClose={() => setIsLogoutOpen(false)} onConfirm={handleLogout} />

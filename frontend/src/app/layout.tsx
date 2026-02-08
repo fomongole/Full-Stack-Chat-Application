@@ -4,8 +4,10 @@ import "./globals.css";
 
 import { AuthProvider } from "@/providers/AuthProvider";
 import { ThemeProvider } from "@/providers/ThemeProvider";
+// IMPORT THE NEW PROVIDER
+import { SocketProvider } from "@/providers/SocketProvider";
 import { ThemeInitializer } from "@/components/ThemeInitializer";
-import {Toaster} from "sonner";
+import { Toaster } from "sonner";
 
 const geistSans = Geist({
     variable: "--font-geist-sans",
@@ -25,14 +27,15 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
     return (
         <html lang="en" suppressHydrationWarning>
-        {/* bg-white to body to ensure it defaults to white */}
         <body className={`${geistSans.variable} ${geistMono.variable} antialiased bg-white dark:bg-zinc-950 text-zinc-950 dark:text-zinc-50`}>
         <ThemeProvider>
             <ThemeInitializer />
             <AuthProvider>
-                {children}
-                {/* RichColors adds the green/red/blue styles to success/error/info */}
-                <Toaster position="top-right" richColors closeButton />
+                {/* WRAP APP IN SOCKET PROVIDER HERE */}
+                <SocketProvider>
+                    {children}
+                    <Toaster position="top-right" richColors closeButton />
+                </SocketProvider>
             </AuthProvider>
         </ThemeProvider>
         </body>

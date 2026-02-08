@@ -3,17 +3,17 @@ import cloudinary from '../config/cloudinary';
 import { AppError } from '../utils/app.error';
 
 export class UserService {
-    async updateProfile(userId: string, data: { about?: string; isPrivate?: string }, file?: Express.Multer.File) {
+    async updateProfile(userId: string, data: { username?: string; about?: string; isPrivate?: string }, file?: Express.Multer.File) {
         let imageUrl: string | undefined;
 
-        // Image upload logic
         if (file) {
             const b64 = Buffer.from(file.buffer).toString('base64');
             const dataURI = "data:" + file.mimetype + ";base64," + b64;
             try {
                 const uploadResponse = await cloudinary.uploader.upload(dataURI, {
                     folder: 'chat-app-profiles',
-                    resource_type: 'image'
+                    resource_type: 'image',
+                    transformation: [{ width: 500, height: 500, crop: "fill" }]
                 });
                 imageUrl = uploadResponse.secure_url;
             } catch (error) {
@@ -23,9 +23,22 @@ export class UserService {
 
         const isPrivateBoolean = data.isPrivate === 'true';
 
+        // Check Username Uniqueness (if changing)
+        if (data.username) {
+            const existingUser = await prisma.user.findUnique({
+                where: { username: data.username }
+            });
+
+            // If user exists AND it's not the current user (collision)
+            if (existingUser && existingUser.id !== userId) {
+                throw new AppError('This username is already taken.', 409);
+            }
+        }
+
         return prisma.user.update({
             where: { id: userId },
             data: {
+                ...(data.username && { username: data.username }),
                 ...(data.about && { about: data.about }),
                 ...(data.isPrivate !== undefined && { isPrivate: isPrivateBoolean }),
                 ...(imageUrl && { image: imageUrl }),
@@ -42,39 +55,68 @@ export class UserService {
         });
     }
 
+    async blockUser(blockerId: string, blockedId: string) {
+        if (blockerId === blockedId) throw new AppError("You cannot block yourself", 400);
+        return await prisma.block.create({
+            data: { blockerId, blockedId }
+        });
+    }
+
+    async unblockUser(blockerId: string, blockedId: string) {
+        return await prisma.block.deleteMany({
+            where: { blockerId, blockedId }
+        });
+    }
+
     /**
-     * This is a critical query for app performance.
-     * * Goal: Fetch active chats, sorted by recency, with unread counts and preview text.
-     * Method: Query 'Conversation' table (not User table) to limit results to actual interactions.
-     * Optimization: Uses Nested Includes and _count to avoid N+1 queries loop.
+     * ENTERPRISE OPTIMIZATION: Lean Sidebar Fetcher
+     * 1. Uses 'select' to fetch ONLY needed columns (saves memory/bandwidth).
+     * 2. Fetches only necessary relation data.
      */
     async getSidebarUsers(currentUserId: string) {
         const conversations = await prisma.conversation.findMany({
             where: {
                 participants: { some: { id: currentUserId } }
             },
-            orderBy: { updatedAt: 'desc' }, // Critical: WhatsApp-style sorting (Recent first)
-            include: {
-                // 1. Get the OTHER user info (The person we are chatting with)
+            // Performance: Sort by index
+            orderBy: { updatedAt: 'desc' },
+            take: 100, // Safety limit
+            select: {
+                id: true,
+                updatedAt: true,
                 participants: {
                     where: { id: { not: currentUserId } },
                     select: {
-                        id: true, username: true, image: true, isOnline: true,
-                        lastSeen: true, isPrivate: true, about: true, email: true
+                        id: true,
+                        username: true,
+                        image: true,
+                        isOnline: true,
+                        lastSeen: true,
+                        isPrivate: true,
+                        about: true,
+                        email: true,
+                        // Lean Block Check
+                        blockedBy: { where: { blockerId: currentUserId }, select: { id: true } },
+                        blockedUsers: { where: { blockedId: currentUserId }, select: { id: true } }
                     }
                 },
-                // 2. Get the Actual Last Message (For Sidebar Preview)
                 messages: {
                     orderBy: { createdAt: 'desc' },
-                    take: 1
+                    take: 1,
+                    select: {
+                        content: true,
+                        createdAt: true,
+                        messageType: true,
+                        authorId: true,
+                        isDeleted: true
+                    }
                 },
-                // 3. Get the Unread Count (Efficient Database-level counting)
                 _count: {
                     select: {
                         messages: {
                             where: {
                                 isRead: false,
-                                authorId: { not: currentUserId } // Only count messages sent BY them
+                                authorId: { not: currentUserId }
                             }
                         }
                     }
@@ -82,72 +124,51 @@ export class UserService {
             }
         });
 
-        // ---------------------------------------------------------
-        // Data Transformation Layer
-        // ---------------------------------------------------------
+        // The mapping logic operates on lighter objects
+        return conversations.map(conv => {
+            const user = conv.participants[0];
+            if (!user) return null;
 
-        // A. If we have active chats, format them
-        if (conversations.length > 0) {
-            return conversations.map(conv => {
-                const user = conv.participants[0]; // Extract the other participant
-                const lastMsg = conv.messages[0];
-                const unreadCount = conv._count.messages;
+            const lastMsg = conv.messages[0];
+            const unreadCount = conv._count.messages;
 
-                // Format Preview: Check if "I" sent the last message
-                let previewText = lastMsg?.content || null;
+            const iBlockedThem = user.blockedBy.length > 0;
+            const theyBlockedMe = user.blockedUsers.length > 0;
+            const isStatusHidden = iBlockedThem || theyBlockedMe;
+            const isProfileHidden = theyBlockedMe;
 
-                if (lastMsg && lastMsg.authorId === currentUserId) {
-                    previewText = `You: ${lastMsg.content}`;
-                }
+            let previewText = lastMsg?.content || "Media message";
+            if (lastMsg?.messageType === 'IMAGE') previewText = "📷 Image";
+            if (lastMsg?.messageType === 'VIDEO') previewText = "🎥 Video";
+            if (lastMsg && lastMsg.authorId === currentUserId) previewText = `You: ${previewText}`;
+            if (lastMsg && lastMsg.isDeleted) previewText = "Message deleted";
 
-                if (lastMsg && lastMsg.isDeleted) {
-                    previewText = "Message deleted";
-                }
+            const baseUser = {
+                id: user.id,
+                username: user.username,
+                image: isProfileHidden ? null : user.image,
+                about: isProfileHidden ? null : user.about,
+                email: isProfileHidden ? null : user.email,
+                isOnline: isStatusHidden ? false : user.isOnline,
+                lastSeen: isStatusHidden ? new Date(0) : user.lastSeen,
+                isPrivate: user.isPrivate,
+                lastMessage: previewText,
+                lastActivity: lastMsg?.createdAt || conv.updatedAt,
+                unreadCount,
+                hasBlocked: iBlockedThem,
+                isBlockedBy: theyBlockedMe
+            };
 
-                const baseUser = {
-                    ...user,
-                    lastMessage: previewText,
-                    // Use message time for sorting, fallback to conversation creation if empty
-                    lastActivity: lastMsg?.createdAt || conv.updatedAt,
-                    unreadCount
-                };
-
-                // Privacy Filter: If user is private, hide PII
-                if (user.isPrivate) {
-                    return {
-                        ...baseUser,
-                        about: null,
-                        email: null,
-                    };
-                }
-
-                return baseUser;
-            });
-        }
-
-        // B. Cold Start / Fallback: If no chats exist, suggest random users
-        const suggestedUsers = await prisma.user.findMany({
-            where: { id: { not: currentUserId } },
-            take: 10,
-            select: {
-                id: true, username: true, image: true, isOnline: true,
-                lastSeen: true, isPrivate: true, about: true, email: true
+            if (user.isPrivate && !isProfileHidden && !iBlockedThem) {
+                return { ...baseUser, about: null, email: null };
             }
-        });
 
-        return suggestedUsers.map(user => {
-            if (user.isPrivate) {
-                return { ...user, about: null, email: null, unreadCount: 0 };
-            }
-            return { ...user, unreadCount: 0 };
-        });
+            return baseUser;
+        }).filter(Boolean);
     }
 
-    /**
-     * Search Users Logic
-     * Used when the sidebar search bar is typed into.
-     */
     async searchUsers(query: string, currentUserId: string) {
+        // Optimized search with specific Select
         const users = await prisma.user.findMany({
             where: {
                 AND: [
@@ -157,27 +178,24 @@ export class UserService {
                             { username: { contains: query, mode: 'insensitive' } },
                             { email: { contains: query, mode: 'insensitive' } }
                         ]
-                    }
+                    },
+                    { blockedUsers: { none: { blockedId: currentUserId } } },
+                    { blockedBy: { none: { blockerId: currentUserId } } }
                 ]
             },
-            take: 20, // Performance Limit
+            take: 20,
             select: {
-                id: true, username: true, image: true, isPrivate: true,
-                isOnline: true, lastSeen: true, about: true
+                id: true,
+                username: true,
+                image: true,
+                isPrivate: true,
+                isOnline: true,
+                lastSeen: true,
+                about: true
             }
         });
 
-        // Apply Privacy Filter
-        return users.map(user => {
-            if (user.isPrivate) {
-                return {
-                    id: user.id, username: user.username, image: user.image,
-                    isOnline: user.isOnline, lastSeen: user.lastSeen,
-                    isPrivate: true, about: null
-                };
-            }
-            return user;
-        });
+        return users.map(user => user.isPrivate ? { ...user, isPrivate: true, about: null } : user);
     }
 }
 

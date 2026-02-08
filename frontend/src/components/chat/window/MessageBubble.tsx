@@ -1,26 +1,29 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, memo } from 'react';
 import { Message } from '@/types';
 import { formatMessageTime } from '@/lib/dateUtils';
 import { useAuthStore } from '@/store/useAuthStore';
+import { MediaAttachment } from './MediaAttachment';
+import { Check, CheckCheck, Trash2, Reply } from 'lucide-react';
+
+interface ExtendedMessage extends Message {
+    isLocal?: boolean;
+}
 
 interface MessageBubbleProps {
-    message: Message;
+    message: ExtendedMessage;
     isFromMe: boolean;
+    isFirstInGroup: boolean;
+    isLastInGroup: boolean;
     onReply: (msg: Message) => void;
     onDelete: (id: string) => void;
 }
 
-export function MessageBubble({ message, isFromMe, onReply, onDelete }: MessageBubbleProps) {
-    const currentUser = useAuthStore(state => state.user);
-    const canDelete = isFromMe && !message.isDeleted;
-
-    // Local state to handle the "Are you sure?" toggle
+export const MessageBubble = memo(function MessageBubble({ message, isFromMe, isFirstInGroup, isLastInGroup, onReply, onDelete }: MessageBubbleProps) {
+    // const currentUser = useAuthStore(state => state.user);
+    const canDelete = isFromMe && !message.isDeleted && !message.isLocal;
     const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
-
-    // Ref to handle the timeout cleanup so we don't get memory leaks
     const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-    // Effect to clean up the timer if the component unmounts
     useEffect(() => {
         return () => {
             if (timeoutRef.current) clearTimeout(timeoutRef.current);
@@ -31,93 +34,138 @@ export function MessageBubble({ message, isFromMe, onReply, onDelete }: MessageB
         if (isConfirmingDelete) {
             onDelete(message.id);
             setIsConfirmingDelete(false);
-            if (timeoutRef.current) clearTimeout(timeoutRef.current);
         } else {
             setIsConfirmingDelete(true);
-            timeoutRef.current = setTimeout(() => {
-                setIsConfirmingDelete(false);
-            }, 3000);
+            timeoutRef.current = setTimeout(() => setIsConfirmingDelete(false), 3000);
         }
     };
 
-    return (
-        <div className={`flex flex-col mb-2 ${isFromMe ? 'items-end' : 'items-start'} group/bubble`}>
+    // --- 1. Bubble Shape Logic ---
+    const myClasses = `bg-primary text-white 
+        ${isFirstInGroup ? 'rounded-tr-none' : 'rounded-tr-xl'} 
+        ${isLastInGroup ? 'rounded-br-xl' : 'rounded-br-xl'} 
+        rounded-l-xl shadow-sm`;
 
-            <div className={`relative max-w-[70%] rounded-2xl p-1 ${
-                isFromMe ? 'bg-primary text-white' : 'bg-zinc-100 dark:bg-zinc-800'
-            }`}>
+    const theirClasses = `bg-white dark:bg-[#202c33] border border-zinc-100 dark:border-zinc-800 text-zinc-900 dark:text-zinc-100
+        ${isFirstInGroup ? 'rounded-tl-none' : 'rounded-tl-xl'} 
+        ${isLastInGroup ? 'rounded-bl-xl' : 'rounded-bl-xl'} 
+        rounded-r-xl shadow-sm`;
 
-                {/* 1. Reply Context */}
-                {message.replyTo && (
-                    <div className={`mb-1 mx-1 p-2 rounded-lg text-xs border-l-4 ${
-                        isFromMe
-                            ? 'bg-white/20 border-white/50 text-white/90'
-                            : 'bg-zinc-200 dark:bg-zinc-700 border-primary text-zinc-600 dark:text-zinc-300'
-                    }`}>
-                        <span className="font-bold block">{message.replyTo.username}</span>
-                        <span className="truncate block opacity-80">{message.replyTo.content}</span>
-                    </div>
-                )}
+    // --- 2. The Action Buttons Component ---
+    const ActionButtons = () => (
+        <div className={`
+            flex items-center gap-1.5 px-2 
+            opacity-0 group-hover/row:opacity-100 transition-opacity duration-200 
+            ${isFromMe ? 'justify-end' : 'justify-start'}
+        `}>
+            {/* Reply */}
+            <button
+                onClick={() => onReply(message)}
+                className="p-1.5 text-zinc-400 hover:text-primary hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors"
+                title="Reply"
+            >
+                <Reply className="w-4 h-4" />
+            </button>
 
-                {/* 2. Main Content */}
-                <div className={`px-3 py-2 text-sm ${message.isDeleted ? "italic opacity-60" : ""}`}>
-                    {message.isDeleted && (
-                        <span className="inline-flex items-center gap-1 mr-1">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" x2="9" y1="9" y2="15"/><line x1="9" x2="15" y1="9" y2="15"/></svg>
-                        </span>
-                    )}
-                    {message.message || message.content}
-                </div>
-
-                {/* 3. Timestamp & Read Receipts */}
-                <div className={`text-[10px] px-3 pb-1 text-right flex items-center justify-end gap-1 ${
-                    isFromMe ? 'text-white/60' : 'text-zinc-400'
-                }`}>
-                    {formatMessageTime(message.timestamp)}
-
-                    {/* Read Receipts (Only on my messages) */}
-                    {isFromMe && !message.isDeleted && (
-                        <span title={message.isRead ? "Read" : "Sent"} className="flex items-center">
-                            {message.isRead ? (
-                                // Double Check (Read)
-                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-200"><path d="M18 6 7 17l-5-5"/><path d="m22 10-7.5 7.5L13 16"/></svg>
-                            ) : (
-                                // Single Check (Sent)
-                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-                            )}
-                        </span>
-                    )}
-                </div>
-            </div>
-
-            {/* 4. Action Buttons */}
-            {!message.isDeleted && (
-                <div className={`flex items-center gap-2 mt-1 px-1 opacity-0 group-hover/bubble:opacity-100 transition-opacity ${
-                    isFromMe ? 'flex-row-reverse' : 'flex-row'
-                }`}>
-                    <button
-                        onClick={() => onReply(message)}
-                        className="text-xs text-zinc-400 hover:text-primary transition-colors"
-                        title="Reply"
-                    >
-                        Reply
-                    </button>
-
-                    {canDelete && (
-                        <button
-                            onClick={handleDeleteClick}
-                            className={`text-xs transition-all duration-200 ${
-                                isConfirmingDelete
-                                    ? "text-red-600 font-bold bg-red-50 px-2 py-0.5 rounded-full"
-                                    : "text-zinc-400 hover:text-red-500"
-                            }`}
-                            title="Delete"
-                        >
-                            {isConfirmingDelete ? "Confirm?" : "Delete"}
-                        </button>
-                    )}
-                </div>
+            {/* Delete */}
+            {canDelete && (
+                <button
+                    onClick={handleDeleteClick}
+                    className={`p-1.5 rounded-full transition-colors flex items-center gap-1 ${
+                        isConfirmingDelete
+                            ? "bg-red-50 text-red-600 dark:bg-red-900/20"
+                            : "text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10"
+                    }`}
+                    title="Delete"
+                >
+                    <Trash2 className="w-4 h-4" />
+                    {isConfirmingDelete && <span className="text-[10px] font-bold uppercase">Confirm</span>}
+                </button>
             )}
         </div>
     );
-}
+
+    // --- 3. Render Layout ---
+    return (
+        <div className={`
+            group/row flex w-full 
+            ${isFromMe ? 'justify-end' : 'justify-start'} 
+            ${isLastInGroup ? 'mb-3' : 'mb-0.5'}
+            animate-in fade-in zoom-in-95 duration-200
+        `}>
+            {/* FLEX CONTAINER: Keeps buttons and bubble side-by-side */}
+            <div className={`
+                flex items-end gap-1 max-w-[95%] md:max-w-[85%]
+                ${isFromMe ? 'flex-row' : 'flex-row-reverse'} 
+            `}>
+
+                {/* SIDE A: Action Buttons (Left for Me, Right for Them via flex-row-reverse) */}
+                <ActionButtons />
+
+                {/* SIDE B: The Actual Bubble */}
+                <div className={`
+                    relative overflow-hidden flex-1
+                    ${isFromMe ? myClasses : theirClasses}
+                    ${message.isLocal ? 'opacity-90' : 'opacity-100'} 
+                    transition-all duration-200
+                `}>
+
+                    {/* Reply Context (Inside Bubble) */}
+                    {message.replyTo && (
+                        <div className={`m-1 p-2 rounded-lg text-xs border-l-4 mb-1 ${
+                            isFromMe
+                                ? 'bg-black/20 border-white/50 text-white/90'
+                                : 'bg-zinc-100 dark:bg-black/20 border-primary text-zinc-600 dark:text-zinc-300'
+                        }`}>
+                            <span className="font-bold block mb-0.5">{message.replyTo.username}</span>
+                            <span className="truncate block opacity-80 line-clamp-1">
+                                {message.replyTo.messageType !== 'TEXT' ? '📷 Media' : message.replyTo.content}
+                            </span>
+                        </div>
+                    )}
+
+                    {/* Media Content */}
+                    {!message.isDeleted && message.attachmentUrl && (
+                        <div className="p-1 pb-0">
+                            <MediaAttachment
+                                url={message.attachmentUrl}
+                                type={message.messageType as 'IMAGE' | 'VIDEO'}
+                                isLocal={message.isLocal}
+                            />
+                        </div>
+                    )}
+
+                    {/* Text & Meta */}
+                    <div className={`
+                        flex flex-wrap items-end gap-2 px-3 py-1.5
+                        ${!message.message && message.attachmentUrl ? 'pb-2' : ''}
+                    `}>
+                        {(message.message || message.isDeleted) && (
+                            <span className={`text-[15px] leading-relaxed break-words max-w-full ${message.isDeleted ? "italic opacity-60 text-sm" : ""}`}>
+                                {message.isDeleted && <span className="inline-flex items-center gap-1 mr-1 text-xs">🚫</span>}
+                                {message.message}
+                            </span>
+                        )}
+
+                        <span className={`text-[10px] ml-auto flex items-center gap-1 whitespace-nowrap ${isFromMe ? 'text-white/70' : 'text-zinc-400'} pt-1 select-none`}>
+                            {message.isLocal ? "Sending..." : formatMessageTime(message.timestamp)}
+                            {isFromMe && !message.isDeleted && !message.isLocal && (
+                                <span title={message.isRead ? "Read" : "Sent"}>
+                                    {message.isRead ? <CheckCheck className="w-3.5 h-3.5 text-white/90" /> : <Check className="w-3.5 h-3.5 text-white/60" />}
+                                </span>
+                            )}
+                        </span>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    );
+}, (prev, next) => {
+    return prev.message.id === next.message.id &&
+        prev.message.isRead === next.message.isRead &&
+        prev.message.isDeleted === next.message.isDeleted &&
+        prev.message.attachmentUrl === next.message.attachmentUrl &&
+        prev.isFirstInGroup === next.isFirstInGroup &&
+        prev.isLastInGroup === next.isLastInGroup;
+});

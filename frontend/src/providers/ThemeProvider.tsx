@@ -19,8 +19,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     return (
         <NextThemesProvider
             attribute="class"
-            defaultTheme="system" // Change from 'light' to 'system'
-            enableSystem={true}   // Change from false to true
+            defaultTheme="system"
+            enableSystem={true}
             storageKey="chat-theme-v2"
             disableTransitionOnChange
         >

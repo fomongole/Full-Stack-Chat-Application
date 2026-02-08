@@ -1,18 +1,35 @@
 import multer from 'multer';
+import { AppError } from '../utils/app.error';
 
-// Use memory storage so we can access the buffer directly
 const storage = multer.memoryStorage();
 
-export const upload = multer({
-    storage,
-    limits: {
-        fileSize: 5 * 1024 * 1024, // Limit to 5MB
-    },
-    fileFilter: (req, file, cb) => {
-        if (file.mimetype.startsWith('image/')) {
-            cb(null, true);
-        } else {
-            cb(new Error('Only images are allowed'));
-        }
+// Helper to validate file types
+const fileFilter = (allowedMimeTypes: RegExp) => (req: any, file: any, cb: any) => {
+    if (allowedMimeTypes.test(file.mimetype)) {
+        cb(null, true);
+    } else {
+        cb(new AppError(`Invalid file type. Only ${allowedMimeTypes} are allowed.`, 400), false);
     }
+};
+
+/**
+ * Policy: Profile Pictures
+ * - Max Size: 1MB (Strict for performance)
+ * - Types: Images only
+ */
+export const uploadProfile = multer({
+    storage,
+    limits: { fileSize: 1 * 1024 * 1024 }, // 1MB
+    fileFilter: fileFilter(/^image\//)
+});
+
+/**
+ * Policy: Chat Media
+ * - Max Size: 5MB (Cost/Bandwidth control)
+ * - Types: Images and Videos
+ */
+export const uploadChatMedia = multer({
+    storage,
+    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+    fileFilter: fileFilter(/^(image\/|video\/)/)
 });

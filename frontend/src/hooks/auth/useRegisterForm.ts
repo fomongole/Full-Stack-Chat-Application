@@ -12,6 +12,7 @@ export const useRegisterForm = () => {
 
     const form = useForm<RegisterValues>({
         resolver: zodResolver(registerSchema),
+        mode: "onChange", // Validate on change for immediate feedback
         defaultValues: {
             email: '',
             username: '',
@@ -40,6 +41,7 @@ export const useRegisterForm = () => {
     return {
         register: form.register,
         handleSubmit: form.handleSubmit(onSubmit),
+        watch: form.watch,
         errors: form.formState.errors,
         isSubmitting: form.formState.isSubmitting
     };
