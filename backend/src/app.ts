@@ -8,7 +8,7 @@ import { notFoundMiddleware } from './middlewares/not-found.middleware';
 const app = express();
 
 app.use(cors({
-    origin: 'https://full-stack-chat-application-seven-theta.vercel.app/',
+    origin: 'https://full-stack-chat-application-engineer-freds-projects.vercel.app',
     credentials: true
 }));
 app.use(express.json());
