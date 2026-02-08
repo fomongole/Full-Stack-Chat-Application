@@ -19,28 +19,35 @@ export const useConversation = (activeUser: User | null) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const isInitialLoad = useRef(true);
 
-    // Track the history length to detect if we added or removed a message
-    const lastHistoryLength = useRef(0);
-
+    // GUARD: Prevents a single message from being counted twice
     const countedMessageIds = useRef<Set<string>>(new Set());
+
     const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const lastTypingEmitRef = useRef<number>(0);
 
     const activeUserRef = useRef(activeUser);
     const conversationIdRef = useRef(conversationId);
 
+    // Preserve scroll position for deletes
+    const scrollPositionBeforeDelete = useRef<number | null>(null);
+
     useEffect(() => { activeUserRef.current = activeUser; }, [activeUser]);
     useEffect(() => { conversationIdRef.current = conversationId; }, [conversationId]);
 
     const socket = useSocket();
     const currentUser = useAuthStore((state) => state.user);
+    const setActiveUser = useChatStore((state) => state.setActiveUser);
 
     const isBlocked = activeUser?.hasBlocked || activeUser?.isBlockedBy;
 
+    // ----------------------------------------------------
+    // SCROLL ACTIONS
+    // ----------------------------------------------------
     const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
         if (scrollRef.current) {
             scrollRef.current.scrollIntoView({ behavior });
             setUnreadBelowCount(0);
+            // Clear the set when we go to bottom to keep memory clean
             countedMessageIds.current.clear();
         }
     }, []);
@@ -52,27 +59,21 @@ export const useConversation = (activeUser: User | null) => {
         if (isInitialLoad.current) {
             scrollToBottom('auto');
             isInitialLoad.current = false;
-            lastHistoryLength.current = chatHistory.length;
             return;
         }
-
-        // ENTERPRISE LOGIC: Only scroll if history length INCREASED (new message)
-        // If length decreased or stayed same, it's a deletion or read-status update.
-        const isNewMessage = chatHistory.length > lastHistoryLength.current;
-        lastHistoryLength.current = chatHistory.length;
-
-        if (!isNewMessage) return; // Stay at current scroll position on deletion
 
         if (newMsgAuthorId === currentUser?.id) {
             scrollToBottom('smooth');
             return;
         }
 
-        const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 250;
+        // Logic: If already at bottom, scroll. If not, we don't increment here
+        // because we moved that logic to the socket receiver for precision.
+        const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150;
         if (isNearBottom) {
             scrollToBottom('smooth');
         }
-    }, [currentUser?.id, scrollToBottom, chatHistory.length]);
+    }, [currentUser?.id, scrollToBottom]);
 
     const handleScroll = useCallback(() => {
         const container = containerRef.current;
@@ -90,7 +91,6 @@ export const useConversation = (activeUser: User | null) => {
             isInitialLoad.current = true;
             setUnreadBelowCount(0);
             countedMessageIds.current.clear();
-            lastHistoryLength.current = 0;
         }
     }, [activeUser?.id]);
 
@@ -100,6 +100,9 @@ export const useConversation = (activeUser: User | null) => {
         }
     }, [chatHistory, isLoadingHistory, handleAutoScroll]);
 
+    // ----------------------------------------------------
+    // SOCKET LISTENERS
+    // ----------------------------------------------------
     useEffect(() => {
         if (!socket || !activeUser?.id) return;
 
@@ -118,28 +121,25 @@ export const useConversation = (activeUser: User | null) => {
 
         const handleLoadHistory = (history: Message[]) => {
             setChatHistory(history);
-            lastHistoryLength.current = history.length;
             setIsLoadingHistory(false);
         };
 
         const handleReceiveMessage = (newMessage: Message) => {
+            // 1. Update the chat UI
             setChatHistory((prev) => {
-                // Deduplicate: If it's the real version of our local message, swap it
-                const isOptimisticMatch = prev.some(m => m.isLocal && m.message === newMessage.message && m.authorId === currentUser?.id);
-
-                if (isOptimisticMatch) {
-                    return prev.map(m => (m.isLocal && m.message === newMessage.message) ? newMessage : m);
-                }
-
-                if (prev.some(m => m.id === newMessage.id)) return prev;
-                return [...prev, newMessage];
+                const filtered = prev.filter(m => !m.isLocal || (m.isLocal && m.attachmentUrl !== newMessage.attachmentUrl && m.id !== newMessage.id));
+                if (filtered.some(m => m.id === newMessage.id)) return filtered;
+                return [...filtered, newMessage];
             });
 
+            // 2. LOGIC: Should we increment the counter?
             const container = containerRef.current;
             const isFromOther = newMessage.authorId !== currentUser?.id;
 
             if (container && isFromOther) {
                 const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150;
+
+                // Only increment if we aren't at the bottom AND we haven't counted this ID yet
                 if (!isNearBottom && !countedMessageIds.current.has(newMessage.id)) {
                     setUnreadBelowCount(prev => prev + 1);
                     countedMessageIds.current.add(newMessage.id);
@@ -157,17 +157,29 @@ export const useConversation = (activeUser: User | null) => {
         };
 
         const handleMessageDeleted = (deletedMsg: Message) => {
-            setChatHistory(prev => prev.map(msg => msg.id === deletedMsg.id ? deletedMsg : msg));
-        };
+            const container = containerRef.current;
+            if (container) {
+                // Save current scroll position before update
+                scrollPositionBeforeDelete.current = container.scrollTop;
+            }
 
+            setChatHistory(prev => prev.map(msg => msg.id === deletedMsg.id ? deletedMsg : msg));
+
+            // Restore scroll position after update
+            if (container && scrollPositionBeforeDelete.current !== null) {
+                const prevScrollTop = scrollPositionBeforeDelete.current;
+                // Adjust for potential height change after delete
+                const heightDiff = container.scrollHeight - (prevScrollTop + container.clientHeight);
+                container.scrollTop = prevScrollTop - heightDiff; // Maintain relative position
+                scrollPositionBeforeDelete.current = null;
+            }
+        };
         const handleUserTyping = (data: { userId: string }) => {
             if (data.userId === activeUserRef.current?.id) setIsRemoteTyping(true);
         };
-
         const handleUserStopTyping = (data: { userId: string }) => {
             if (data.userId === activeUserRef.current?.id) setIsRemoteTyping(false);
         };
-
         const handleMessagesRead = (data: { conversationId: string, readerId: string }) => {
             if (data.conversationId === conversationIdRef.current && data.readerId === activeUserRef.current?.id) {
                 setChatHistory(prev => prev.map(msg => ({ ...msg, isRead: true })));
@@ -191,44 +203,40 @@ export const useConversation = (activeUser: User | null) => {
             socket.off("user_stop_typing", handleUserStopTyping);
             socket.off("messages_read", handleMessagesRead);
         };
-    }, [socket, activeUser?.id, currentUser?.id]);
+    }, [socket, activeUser?.id, currentUser?.id]); // Added currentUser.id to deps
 
+    // --- ACTIONS ---
     const sendMessage = (e?: React.FormEvent) => {
         if (e) e.preventDefault();
         if (isBlocked) return;
-        if (!message.trim() || !socket || !activeUser || !conversationId || !currentUser) return;
+        if (!message.trim() || !socket || !activeUser || !conversationId) return;
 
-        // OPTIMISTIC UPDATE FOR TEXT
+        // Optimistic update for text messages
         const tempId = uuidv4();
-        const optimisticMsg: Message & { isLocal?: boolean } = {
+        const optimisticMessage: Message & { isLocal?: boolean } = {
             id: tempId,
             conversationId,
-            authorId: currentUser.id,
-            username: currentUser.username,
-            image: currentUser.image,
-            message: message.trim(),
-            content: message.trim(),
+            authorId: currentUser!.id,
+            username: currentUser!.username,
+            image: currentUser!.image,
+            message: message,
+            content: message,
             messageType: 'TEXT',
+            attachmentUrl: null,
             isDeleted: false,
             isRead: false,
             timestamp: new Date().toISOString(),
             isLocal: true,
-            replyTo: (replyTo && !replyTo.isDeleted) ? {
-                id: replyTo.id,
-                username: replyTo.username,
-                content: replyTo.content || "Media"
-            } : null
+            replyTo: replyTo ? { id: replyTo.id, username: replyTo.username, content: replyTo.content || "Media" } : null
         };
 
-        setChatHistory(prev => [...prev, optimisticMsg]);
+        setChatHistory(prev => [...prev, optimisticMessage]);
+        handleAutoScroll(currentUser?.id); // Scroll to bottom for own message
 
-        socket.emit("send_message", {
-            conversationId,
-            recipientId: activeUser.id,
-            message: message.trim(),
-            replyToId: (replyTo && !replyTo.isDeleted) ? replyTo.id : undefined
-        });
+        // Emit the message
+        socket.emit("send_message", { conversationId, recipientId: activeUser.id, message, replyToId: replyTo?.id });
 
+        // Clear input and reply
         setMessage('');
         setReplyTo(null);
         socket.emit("stop_typing", { conversationId, recipientId: activeUser.id });
@@ -239,22 +247,14 @@ export const useConversation = (activeUser: User | null) => {
         const tempId = uuidv4();
         const objectUrl = URL.createObjectURL(file);
         const type = file.type.startsWith('video/') ? 'VIDEO' : 'IMAGE';
-
         const optimisticMessage: Message & { isLocal?: boolean } = {
             id: tempId, conversationId, authorId: currentUser.id, username: currentUser.username,
             image: currentUser.image, message: caption, content: caption, messageType: type,
             attachmentUrl: objectUrl, isDeleted: false, isRead: false, timestamp: new Date().toISOString(),
-            isLocal: true,
-            replyTo: (replyTo && !replyTo.isDeleted) ? {
-                id: replyTo.id,
-                username: replyTo.username,
-                content: replyTo.content || "Media"
-            } : null
+            isLocal: true, replyTo: replyTo ? { id: replyTo.id, username: replyTo.username, content: replyTo.content || "Media" } : null
         };
-
         setChatHistory(prev => [...prev, optimisticMessage]);
         setReplyTo(null);
-
         const formData = new FormData();
         formData.append('file', file);
         try {
