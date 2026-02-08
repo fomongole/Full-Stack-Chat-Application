@@ -28,26 +28,18 @@ export function ChatInput({ value, onChange, onSend, replyTo, onCancelReply, isB
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
-
-        // 1. Validate File Size immediately
         if (file.size > MAX_MEDIA_SIZE_BYTES) {
             toast.error(`File too large. Maximum size is ${MAX_MEDIA_SIZE_MB}MB.`);
-            // Reset input so user can try again
             if (fileInputRef.current) fileInputRef.current.value = '';
             return;
         }
-
-        // 2. Validate Type (Safety check)
         if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
             toast.error("Only images and videos are allowed.");
             if (fileInputRef.current) fileInputRef.current.value = '';
             return;
         }
-
         setSelectedFile(file);
         setPreviewUrl(URL.createObjectURL(file));
-
-        // Reset the input value so the same file can be selected again if needed (e.g. after clearing)
         e.target.value = '';
     };
 
@@ -61,7 +53,6 @@ export function ChatInput({ value, onChange, onSend, replyTo, onCancelReply, isB
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (isUploading) return;
-
         if (selectedFile && onUploadMedia) {
             setIsUploading(true);
             try {
@@ -87,7 +78,6 @@ export function ChatInput({ value, onChange, onSend, replyTo, onCancelReply, isB
 
     if (isBlocked) {
         return (
-            // FIX: Added safe-area-inset-bottom support
             <footer className="p-4 bg-white dark:bg-zinc-950 text-center z-20 border-t border-zinc-200 dark:border-zinc-800 pb-[env(safe-area-inset-bottom)]">
                 <div className="bg-zinc-100 dark:bg-zinc-900 p-3 rounded-lg text-zinc-500 text-sm">
                     You cannot send messages to this conversation.
@@ -97,9 +87,7 @@ export function ChatInput({ value, onChange, onSend, replyTo, onCancelReply, isB
     }
 
     return (
-        // This ensures 12px padding on desktop, but expands to cover the home bar on iPhone
         <footer className="p-3 md:p-4 bg-white dark:bg-zinc-950 border-t border-zinc-100 dark:border-zinc-900 z-20 pb-[max(12px,env(safe-area-inset-bottom))]">
-            {/* Reply Preview */}
             {replyTo && !selectedFile && (
                 <div className="mb-2 mx-1 flex items-center justify-between bg-zinc-50 dark:bg-zinc-900 p-2 rounded-lg border-l-4 border-primary shadow-sm animate-in slide-in-from-bottom-2">
                     <div className="text-sm overflow-hidden">
@@ -114,7 +102,6 @@ export function ChatInput({ value, onChange, onSend, replyTo, onCancelReply, isB
                 </div>
             )}
 
-            {/* File Preview */}
             {selectedFile && previewUrl && (
                 <div className="mb-2 p-2 bg-zinc-50 dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 flex items-center gap-3 animate-in fade-in slide-in-from-bottom-2">
                     <div className="h-14 w-14 rounded-lg overflow-hidden bg-black/10 shrink-0 border border-zinc-200 dark:border-zinc-700">
@@ -137,7 +124,6 @@ export function ChatInput({ value, onChange, onSend, replyTo, onCancelReply, isB
             <form onSubmit={handleSubmit} className="flex items-end gap-2 max-w-5xl mx-auto">
                 <input type="file" ref={fileInputRef} className="hidden" accept="image/*,video/*" onChange={handleFileSelect} />
 
-                {/* Attach Button */}
                 <button
                     type="button"
                     disabled={isUploading || !!selectedFile}
@@ -148,8 +134,8 @@ export function ChatInput({ value, onChange, onSend, replyTo, onCancelReply, isB
                     {selectedFile ? <Image className="w-6 h-6" /> : <Paperclip className="w-6 h-6" />}
                 </button>
 
-                {/* Auto-Expanding Textarea */}
-                <div className="flex-1 bg-zinc-100 dark:bg-zinc-800/50 rounded-[24px] border border-transparent focus-within:border-zinc-300 dark:focus-within:border-zinc-700 focus-within:bg-white dark:focus-within:bg-zinc-900 transition-all flex items-center px-2 py-2">
+                {/* MODIFIED: Removed focus-within borders and background changes */}
+                <div className="flex-1 bg-zinc-100 dark:bg-zinc-800/50 rounded-[24px] border border-transparent transition-all flex items-center px-2 py-2">
                     <TextareaAutosize
                         minRows={1}
                         maxRows={5}
@@ -157,11 +143,10 @@ export function ChatInput({ value, onChange, onSend, replyTo, onCancelReply, isB
                         onChange={(e) => onChange(e.target.value)}
                         onKeyDown={handleKeyDown}
                         placeholder={selectedFile ? "Add a caption..." : "Message"}
-                        className="w-full resize-none bg-transparent border-none focus:ring-0 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-500 text-[15px] leading-6 max-h-[150px] px-3 py-0.5 scrollbar-hide"
+                        className="w-full resize-none bg-transparent border-none focus:ring-0 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-500 text-[15px] leading-6 max-h-[150px] px-3 py-0.5 scrollbar-hide outline-none"
                     />
                 </div>
 
-                {/* Send Button */}
                 <Button
                     type="submit"
                     disabled={isUploading || (!value.trim() && !selectedFile)}

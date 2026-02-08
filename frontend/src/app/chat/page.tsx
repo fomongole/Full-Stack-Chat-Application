@@ -4,16 +4,15 @@ import { useChatStore } from '@/store/useChatStore';
 import { useConversation } from '@/hooks/chat/useConversation';
 import { User } from '@/types';
 import { getMessageDateLabel } from '@/lib/dateUtils';
-
 import { ChatHeader } from '@/components/chat/window/ChatHeader';
 import { MessageBubble } from '@/components/chat/window/MessageBubble';
 import { ChatInput } from '@/components/chat/window/ChatInput';
+import { Loader2 } from 'lucide-react';
 
 export default function ChatPage() {
     const activeUser = useChatStore((state) => state.activeUser) as User | null;
-
     const {
-        message, setMessage, chatHistory, sendMessage,
+        message, setMessage, chatHistory, isLoadingHistory, sendMessage,
         sendMediaMessage, deleteMessage, replyTo, setReplyTo,
         isRemoteTyping, scrollRef, isBlocked
     } = useConversation(activeUser);
@@ -40,53 +39,60 @@ export default function ChatPage() {
     );
 
     return (
-        <div className="flex flex-col h-full w-full relative z-10">
-            {/* 1. HEADER: Flex-none ensures it never shrinks or scrolls away */}
-            <div className="flex-none">
+        <div className="flex flex-col h-full w-full overflow-hidden relative bg-[#efeae2] dark:bg-[#0b141a]">
+            {/* Background Pattern - Absolute to not interfere with flex layout */}
+            <div className="absolute inset-0 opacity-[0.06] dark:opacity-[0.03] pointer-events-none bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')] z-0"></div>
+
+            {/* 1. HEADER: Flex-none ensures it never shrinks or scrolls away. z-30 to stay above messages */}
+            <div className="flex-none z-30">
                 <ChatHeader user={activeUser} isTyping={isRemoteTyping} />
             </div>
 
-            {/* 2. MESSAGES: Flex-1 + Overflow-y-auto makes ONLY this part scroll */}
-            <div className="flex-1 overflow-y-auto p-4 md:px-8 md:py-4 space-y-1 custom-scrollbar overscroll-contain">
-                {chatHistory.map((msg, i) => {
-                    const isFromMe = msg.username !== activeUser.username;
-                    const previousMsg = chatHistory[i - 1];
-                    const nextMsg = chatHistory[i + 1];
-
-                    const isFirstInGroup = !previousMsg || previousMsg.username !== msg.username ||
-                        getMessageDateLabel(msg.timestamp) !== getMessageDateLabel(previousMsg.timestamp);
-
-                    const isLastInGroup = !nextMsg || nextMsg.username !== msg.username;
-
-                    const showDateHeader = i === 0 ||
-                        getMessageDateLabel(msg.timestamp) !== getMessageDateLabel(chatHistory[i - 1].timestamp);
-
-                    return (
-                        <React.Fragment key={msg.id || i}>
-                            {showDateHeader && (
-                                <div className="flex justify-center my-6 sticky top-2 z-10">
-                                    <span className="text-[11px] font-medium text-[#54656f] dark:text-[#8696a0] bg-[#eef0f2] dark:bg-[#1f2c34] px-3 py-1.5 rounded-lg shadow-sm border border-black/5">
-                                        {getMessageDateLabel(msg.timestamp)}
-                                    </span>
-                                </div>
-                            )}
-
-                            <MessageBubble
-                                message={msg}
-                                isFromMe={isFromMe}
-                                isFirstInGroup={isFirstInGroup}
-                                isLastInGroup={isLastInGroup}
-                                onReply={setReplyTo}
-                                onDelete={deleteMessage}
-                            />
-                        </React.Fragment>
-                    );
-                })}
-                <div ref={scrollRef} />
+            {/* 2. MESSAGES AREA: Flex-1 + min-h-0 is crucial for nested flex scrolling */}
+            <div className="flex-1 overflow-y-auto relative z-10 custom-scrollbar overscroll-contain min-h-0">
+                {isLoadingHistory ? (
+                    <div className="flex flex-col items-center justify-center h-full space-y-4">
+                        <Loader2 className="w-8 h-8 text-primary animate-spin opacity-50" />
+                        <p className="text-xs text-zinc-500 font-medium">Loading messages...</p>
+                    </div>
+                ) : (
+                    <div className="p-4 md:px-8 md:py-4 space-y-1 pb-4">
+                        {chatHistory.map((msg, i) => {
+                            const isFromMe = msg.username !== activeUser.username;
+                            const previousMsg = chatHistory[i - 1];
+                            const nextMsg = chatHistory[i + 1];
+                            const isFirstInGroup = !previousMsg || previousMsg.username !== msg.username ||
+                                getMessageDateLabel(msg.timestamp) !== getMessageDateLabel(previousMsg.timestamp);
+                            const isLastInGroup = !nextMsg || nextMsg.username !== msg.username;
+                            const showDateHeader = i === 0 ||
+                                getMessageDateLabel(msg.timestamp) !== getMessageDateLabel(chatHistory[i - 1].timestamp);
+                            return (
+                                <React.Fragment key={msg.id || i}>
+                                    {showDateHeader && (
+                                        <div className="flex justify-center my-6 sticky top-2 z-10">
+                                            <span className="text-[11px] font-medium text-[#54656f] dark:text-[#8696a0] bg-[#eef0f2] dark:bg-[#1f2c34] px-3 py-1.5 rounded-lg shadow-sm border border-black/5">
+                                                {getMessageDateLabel(msg.timestamp)}
+                                            </span>
+                                        </div>
+                                    )}
+                                    <MessageBubble
+                                        message={msg}
+                                        isFromMe={isFromMe}
+                                        isFirstInGroup={isFirstInGroup}
+                                        isLastInGroup={isLastInGroup}
+                                        onReply={setReplyTo}
+                                        onDelete={deleteMessage}
+                                    />
+                                </React.Fragment>
+                            );
+                        })}
+                        <div ref={scrollRef} className="h-1" />
+                    </div>
+                )}
             </div>
 
-            {/* 3. INPUT: Flex-none ensures it sticks to bottom */}
-            <div className="flex-none">
+            {/* 3. INPUT: Flex-none ensures it sticks to bottom. z-20 to stay above background */}
+            <div className="flex-none z-20">
                 <ChatInput
                     value={message}
                     onChange={setMessage}

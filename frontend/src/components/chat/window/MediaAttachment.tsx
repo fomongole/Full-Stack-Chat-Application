@@ -14,7 +14,8 @@ export function MediaAttachment({ url, type, isLocal }: MediaAttachmentProps) {
     const videoRef = useRef<HTMLVideoElement>(null);
 
     const handleDownload = async (e: React.MouseEvent) => {
-        e.stopPropagation();
+        e.stopPropagation(); // Prevents bubbling to container
+        e.preventDefault();
         try {
             const response = await fetch(url);
             const blob = await response.blob();
@@ -43,7 +44,6 @@ export function MediaAttachment({ url, type, isLocal }: MediaAttachmentProps) {
                 }
             }
         };
-
         return (
             <div className="relative rounded-lg overflow-hidden bg-black max-w-sm w-full aspect-video group/video border border-zinc-200 dark:border-zinc-800">
                 <video
@@ -55,8 +55,6 @@ export function MediaAttachment({ url, type, isLocal }: MediaAttachmentProps) {
                     onPause={() => setIsPlaying(false)}
                     onPlay={() => setIsPlaying(true)}
                 />
-
-                {/* Custom Play Button Overlay (Visible when paused and not loading) */}
                 {!isPlaying && !isLoading && !isLocal && (
                     <div
                         onClick={handlePlayClick}
@@ -67,8 +65,6 @@ export function MediaAttachment({ url, type, isLocal }: MediaAttachmentProps) {
                         </div>
                     </div>
                 )}
-
-                {/* Loading Spinner */}
                 {(isLoading || isLocal) && (
                     <div className="absolute inset-0 flex items-center justify-center bg-zinc-900/50 backdrop-blur-sm">
                         <div className="w-8 h-8 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
@@ -82,7 +78,10 @@ export function MediaAttachment({ url, type, isLocal }: MediaAttachmentProps) {
     return (
         <>
             <div
-                onClick={() => !isLocal && setIsExpanded(true)}
+                onClick={(e) => {
+                    e.stopPropagation();
+                    if (!isLocal) setIsExpanded(true);
+                }}
                 className={`
                     relative rounded-lg overflow-hidden bg-zinc-100 dark:bg-zinc-800 
                     cursor-pointer group/image border border-zinc-200 dark:border-zinc-800
@@ -100,15 +99,11 @@ export function MediaAttachment({ url, type, isLocal }: MediaAttachmentProps) {
                     onLoad={() => setIsLoading(false)}
                     loading="lazy"
                 />
-
-                {/* Optimistic Upload Spinner */}
                 {isLocal && (
                     <div className="absolute inset-0 bg-black/40 flex items-center justify-center backdrop-blur-[2px]">
                         <div className="w-8 h-8 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
                     </div>
                 )}
-
-                {/* Hover Overlay Icon */}
                 {!isLoading && !isLocal && (
                     <div className="absolute inset-0 bg-black/0 group-hover/image:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover/image:opacity-100">
                         <Maximize2 className="w-6 h-6 text-white drop-shadow-md" />
@@ -116,34 +111,43 @@ export function MediaAttachment({ url, type, isLocal }: MediaAttachmentProps) {
                 )}
             </div>
 
-            {/* Lightbox Modal */}
+            {/* Lightbox Modal - FIXED: High Z-index, Propagation Handling */}
             {isExpanded && (
                 <div
-                    className="fixed inset-0 z-[60] bg-black/95 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200"
-                    onClick={() => setIsExpanded(false)}
+                    className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        setIsExpanded(false);
+                    }}
                 >
-                    {/* Toolbar */}
-                    <div className="absolute top-4 right-4 flex gap-3" onClick={(e) => e.stopPropagation()}>
+                    {/* Toolbar - FIXED: High Z-index, Absolute positioning */}
+                    <div
+                        className="absolute top-6 right-6 flex gap-4 z-[110]"
+                        onClick={(e) => e.stopPropagation()}
+                    >
                         <button
                             onClick={handleDownload}
-                            className="p-2.5 bg-white/10 hover:bg-white/20 text-white/80 hover:text-white rounded-full transition-all backdrop-blur-md"
+                            className="p-3 bg-white/10 hover:bg-white/20 text-white/90 hover:text-white rounded-full transition-all backdrop-blur-md border border-white/10"
                             title="Download"
                         >
-                            <Download className="w-5 h-5" />
+                            <Download className="w-6 h-6" />
                         </button>
                         <button
-                            onClick={() => setIsExpanded(false)}
-                            className="p-2.5 bg-white/10 hover:bg-red-500/20 text-white/80 hover:text-red-400 rounded-full transition-all backdrop-blur-md"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setIsExpanded(false);
+                            }}
+                            className="p-3 bg-white/10 hover:bg-red-500/40 text-white/90 hover:text-white rounded-full transition-all backdrop-blur-md border border-white/10"
                             title="Close"
                         >
-                            <X className="w-5 h-5" />
+                            <X className="w-6 h-6" />
                         </button>
                     </div>
 
                     <img
                         src={url}
                         alt="Full size"
-                        className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl animate-in zoom-in-95 duration-300"
+                        className="max-w-full max-h-[90vh] object-contain rounded-md shadow-2xl animate-in zoom-in-95 duration-300"
                         onClick={(e) => e.stopPropagation()}
                     />
                 </div>

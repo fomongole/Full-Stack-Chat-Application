@@ -4,7 +4,6 @@ import "./globals.css";
 
 import { AuthProvider } from "@/providers/AuthProvider";
 import { ThemeProvider } from "@/providers/ThemeProvider";
-// IMPORT THE NEW PROVIDER
 import { SocketProvider } from "@/providers/SocketProvider";
 import { ThemeInitializer } from "@/components/ThemeInitializer";
 import { Toaster } from "sonner";
@@ -31,7 +30,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ThemeProvider>
             <ThemeInitializer />
             <AuthProvider>
-                {/* WRAP APP IN SOCKET PROVIDER HERE */}
                 <SocketProvider>
                     {children}
                     <Toaster position="top-right" richColors closeButton />

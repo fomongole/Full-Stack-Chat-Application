@@ -9,13 +9,14 @@ import { v4 as uuidv4 } from 'uuid';
 export const useConversation = (activeUser: User | null) => {
     const [message, setMessage] = useState('');
     const [chatHistory, setChatHistory] = useState<(Message & { isLocal?: boolean })[]>([]);
+    const [isLoadingHistory, setIsLoadingHistory] = useState(false); // NEW: Loading State
     const [conversationId, setConversationId] = useState<string | null>(null);
     const [replyTo, setReplyTo] = useState<Message | null>(null);
     const [isRemoteTyping, setIsRemoteTyping] = useState(false);
 
     const scrollRef = useRef<HTMLDivElement>(null);
     const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-    const lastTypingEmitRef = useRef<number>(0); // NEW: Track last emit time for throttling
+    const lastTypingEmitRef = useRef<number>(0);
 
     const socket = useSocket();
     const currentUser = useAuthStore((state) => state.user);
@@ -23,10 +24,12 @@ export const useConversation = (activeUser: User | null) => {
 
     const isBlocked = activeUser?.hasBlocked || activeUser?.isBlockedBy;
 
-    // Auto-scroll
+    // Auto-scroll logic: triggered on history change, typing, or when loading finishes
     useEffect(() => {
-        scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [chatHistory, isRemoteTyping, replyTo]);
+        if (!isLoadingHistory) {
+            scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }
+    }, [chatHistory, isRemoteTyping, replyTo, isLoadingHistory]);
 
     // ----------------------------------------------------
     // SOCKET LISTENERS
@@ -34,24 +37,26 @@ export const useConversation = (activeUser: User | null) => {
     useEffect(() => {
         if (!socket || !activeUser) return;
 
+        // 1. Set Loading to true immediately when user switches
+        setIsLoadingHistory(true);
+        setChatHistory([]); // Clear previous chat instantly to prevent ghosting
+
         socket.emit("join_conversation", { recipientId: activeUser.id });
 
         const handleConversationJoined = (data: { conversationId: string }) => {
             setConversationId(data.conversationId);
             socket.emit("mark_as_read", { conversationId: data.conversationId, recipientId: activeUser.id });
         };
-        const handleLoadHistory = (history: Message[]) => setChatHistory(history);
 
-        // --- DEDUPLICATION LOGIC ---
+        const handleLoadHistory = (history: Message[]) => {
+            setChatHistory(history);
+            setIsLoadingHistory(false); // 2. Turn off loading when data arrives
+        };
+
         const handleReceiveMessage = (newMessage: Message) => {
             setChatHistory((prev) => {
-                // Remove any local message that matches the new message's URL
-                // This works because we sync the URLs in sendMediaMessage below
                 const filtered = prev.filter(m => !m.isLocal || (m.isLocal && m.attachmentUrl !== newMessage.attachmentUrl));
-
-                // Safety check to avoid ID collisions
                 if (filtered.some(m => m.id === newMessage.id)) return filtered;
-
                 return [...filtered, newMessage];
             });
 
@@ -110,9 +115,7 @@ export const useConversation = (activeUser: User | null) => {
         };
     }, [socket, activeUser, currentUser, conversationId, setActiveUser]);
 
-
     // --- ACTIONS ---
-
     const sendMessage = (e?: React.FormEvent) => {
         if (e) e.preventDefault();
         if (isBlocked) return;
@@ -133,7 +136,6 @@ export const useConversation = (activeUser: User | null) => {
     const sendMediaMessage = async (file: File, caption: string) => {
         if (isBlocked || !conversationId || !activeUser || !socket || !currentUser) return;
 
-        // 1. Optimistic UI: Add local message immediately
         const tempId = uuidv4();
         const objectUrl = URL.createObjectURL(file);
         const type = file.type.startsWith('video/') ? 'VIDEO' : 'IMAGE';
@@ -172,12 +174,10 @@ export const useConversation = (activeUser: User | null) => {
 
             const { url, type: serverType } = response.data.data;
 
-            // Updating the local message with the REAL URL from the server.
             setChatHistory(prev => prev.map(msg =>
                 msg.id === tempId ? { ...msg, attachmentUrl: url } : msg
             ));
 
-            // 3. Emit Real Message
             socket.emit("send_message", {
                 conversationId,
                 recipientId: activeUser.id,
@@ -199,24 +199,17 @@ export const useConversation = (activeUser: User | null) => {
         socket.emit("delete_message", { conversationId, messageId });
     };
 
-    /**
-     * OPTIMIZATION: Throttled Typing Indicator
-     * Only emits the 'typing' event once every 2 seconds to reduce network load.
-     * Uses useCallback to ensure stability.
-     */
     const handleTyping = useCallback((text: string) => {
         setMessage(text);
 
         if (!socket || !conversationId || !activeUser || currentUser?.isPrivate || isBlocked) return;
 
         const now = Date.now();
-        // THROTTLE: Checking if 2000ms has passed since last emit
         if (now - lastTypingEmitRef.current > 2000) {
             socket.emit("typing", { conversationId, recipientId: activeUser.id });
             lastTypingEmitRef.current = now;
         }
 
-        // Debouncing the stop typing event (wait 3 seconds after last keystroke)
         if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
         typingTimeoutRef.current = setTimeout(() => {
             if (activeUser) socket.emit("stop_typing", { conversationId, recipientId: activeUser.id });
@@ -227,6 +220,7 @@ export const useConversation = (activeUser: User | null) => {
         message,
         setMessage: handleTyping,
         chatHistory,
+        isLoadingHistory,
         conversationId,
         sendMessage,
         sendMediaMessage,
