@@ -22,6 +22,9 @@ export const useConversation = (activeUser: User | null) => {
     // GUARD: Prevents a single message from being counted twice
     const countedMessageIds = useRef<Set<string>>(new Set());
 
+    // FLAG: Prevents auto-scroll when an update is caused by deletion
+    const isDeletingRef = useRef(false);
+
     const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const lastTypingEmitRef = useRef<number>(0);
 
@@ -91,7 +94,14 @@ export const useConversation = (activeUser: User | null) => {
         }
     }, [activeUser?.id]);
 
+    // --- FIX APPLIED HERE ---
     useEffect(() => {
+        // If this update was caused by a deletion, DO NOT auto-scroll.
+        if (isDeletingRef.current) {
+            isDeletingRef.current = false; // Reset the flag
+            return;
+        }
+
         if (!isLoadingHistory && chatHistory.length > 0) {
             handleAutoScroll(chatHistory[chatHistory.length - 1]?.authorId);
         }
@@ -103,12 +113,14 @@ export const useConversation = (activeUser: User | null) => {
         if (container && deleteAdjustment.current) {
             const { oldHeight, oldScrollTop } = deleteAdjustment.current;
             const newHeight = container.scrollHeight;
+
+            // Only adjust if height actually changed
             if (newHeight !== oldHeight && oldScrollTop > 0) {
                 container.scrollTop = oldScrollTop + (newHeight - oldHeight);
             }
             deleteAdjustment.current = null;
         }
-    }, [chatHistory]); // Runs after every history update/render
+    }, [chatHistory]);
 
     // ----------------------------------------------------
     // SOCKET LISTENERS
@@ -164,6 +176,10 @@ export const useConversation = (activeUser: User | null) => {
 
         const handleMessageDeleted = (deletedMsg: Message) => {
             const container = containerRef.current;
+
+            // 1. SET FLAG TO BLOCK AUTO-SCROLL
+            isDeletingRef.current = true;
+
             if (container) {
                 // Save before update for useLayoutEffect
                 deleteAdjustment.current = {
