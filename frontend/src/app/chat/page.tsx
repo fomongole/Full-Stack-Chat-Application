@@ -39,16 +39,17 @@ export default function ChatPage() {
     );
 
     return (
+        // Added overflow-hidden to parent to prevent full page scroll
         <div className="flex flex-col h-full w-full overflow-hidden relative bg-[#efeae2] dark:bg-[#0b141a]">
-            {/* Background Pattern - Absolute to not interfere with flex layout */}
+            {/* Background Pattern */}
             <div className="absolute inset-0 opacity-[0.06] dark:opacity-[0.03] pointer-events-none bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')] z-0"></div>
 
-            {/* 1. HEADER: Flex-none ensures it never shrinks or scrolls away. z-30 to stay above messages */}
+            {/* 1. HEADER: Flex-none + z-30 */}
             <div className="flex-none z-30">
                 <ChatHeader user={activeUser} isTyping={isRemoteTyping} />
             </div>
 
-            {/* 2. MESSAGES AREA: Flex-1 + min-h-0 is crucial for nested flex scrolling */}
+            {/* 2. MESSAGES: Flex-1 + min-h-0 + overflow-y-auto */}
             <div className="flex-1 overflow-y-auto relative z-10 custom-scrollbar overscroll-contain min-h-0">
                 {isLoadingHistory ? (
                     <div className="flex flex-col items-center justify-center h-full space-y-4">
@@ -91,7 +92,7 @@ export default function ChatPage() {
                 )}
             </div>
 
-            {/* 3. INPUT: Flex-none ensures it sticks to bottom. z-20 to stay above background */}
+            {/* 3. INPUT: Flex-none + z-20 */}
             <div className="flex-none z-20">
                 <ChatInput
                     value={message}

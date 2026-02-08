@@ -134,7 +134,7 @@ export function ChatInput({ value, onChange, onSend, replyTo, onCancelReply, isB
                     {selectedFile ? <Image className="w-6 h-6" /> : <Paperclip className="w-6 h-6" />}
                 </button>
 
-                {/* MODIFIED: Removed focus-within borders and background changes */}
+                {/* MODIFIED: Completely stripped focus-within border/ring classes */}
                 <div className="flex-1 bg-zinc-100 dark:bg-zinc-800/50 rounded-[24px] border border-transparent transition-all flex items-center px-2 py-2">
                     <TextareaAutosize
                         minRows={1}

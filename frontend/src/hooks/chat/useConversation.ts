@@ -9,7 +9,7 @@ import { v4 as uuidv4 } from 'uuid';
 export const useConversation = (activeUser: User | null) => {
     const [message, setMessage] = useState('');
     const [chatHistory, setChatHistory] = useState<(Message & { isLocal?: boolean })[]>([]);
-    const [isLoadingHistory, setIsLoadingHistory] = useState(false); // NEW: Loading State
+    const [isLoadingHistory, setIsLoadingHistory] = useState(false);
     const [conversationId, setConversationId] = useState<string | null>(null);
     const [replyTo, setReplyTo] = useState<Message | null>(null);
     const [isRemoteTyping, setIsRemoteTyping] = useState(false);
@@ -18,13 +18,21 @@ export const useConversation = (activeUser: User | null) => {
     const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const lastTypingEmitRef = useRef<number>(0);
 
+    // REFS: These keep track of state inside socket listeners without triggering re-renders
+    const activeUserRef = useRef(activeUser);
+    const conversationIdRef = useRef(conversationId);
+
+    // Sync Refs
+    useEffect(() => { activeUserRef.current = activeUser; }, [activeUser]);
+    useEffect(() => { conversationIdRef.current = conversationId; }, [conversationId]);
+
     const socket = useSocket();
     const currentUser = useAuthStore((state) => state.user);
     const setActiveUser = useChatStore((state) => state.setActiveUser);
 
     const isBlocked = activeUser?.hasBlocked || activeUser?.isBlockedBy;
 
-    // Auto-scroll logic: triggered on history change, typing, or when loading finishes
+    // Auto-scroll
     useEffect(() => {
         if (!isLoadingHistory) {
             scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -35,22 +43,26 @@ export const useConversation = (activeUser: User | null) => {
     // SOCKET LISTENERS
     // ----------------------------------------------------
     useEffect(() => {
-        if (!socket || !activeUser) return;
+        if (!socket || !activeUser?.id) return;
 
-        // 1. Set Loading to true immediately when user switches
+        // ONLY Trigger loading if we are actually switching to a NEW user
         setIsLoadingHistory(true);
-        setChatHistory([]); // Clear previous chat instantly to prevent ghosting
+        setChatHistory([]);
 
         socket.emit("join_conversation", { recipientId: activeUser.id });
 
         const handleConversationJoined = (data: { conversationId: string }) => {
             setConversationId(data.conversationId);
-            socket.emit("mark_as_read", { conversationId: data.conversationId, recipientId: activeUser.id });
+            // Use ref to avoid stale closure issues if needed, but here we just emit
+            socket.emit("mark_as_read", {
+                conversationId: data.conversationId,
+                recipientId: activeUserRef.current?.id
+            });
         };
 
         const handleLoadHistory = (history: Message[]) => {
             setChatHistory(history);
-            setIsLoadingHistory(false); // 2. Turn off loading when data arrives
+            setIsLoadingHistory(false);
         };
 
         const handleReceiveMessage = (newMessage: Message) => {
@@ -60,9 +72,13 @@ export const useConversation = (activeUser: User | null) => {
                 return [...filtered, newMessage];
             });
 
-            if (newMessage.authorId === activeUser.id) setIsRemoteTyping(false);
-            if (document.visibilityState === 'visible' && newMessage.conversationId === conversationId) {
-                socket.emit("mark_as_read", { conversationId: newMessage.conversationId, recipientId: activeUser.id });
+            if (newMessage.authorId === activeUserRef.current?.id) setIsRemoteTyping(false);
+
+            if (document.visibilityState === 'visible' && newMessage.conversationId === conversationIdRef.current) {
+                socket.emit("mark_as_read", {
+                    conversationId: newMessage.conversationId,
+                    recipientId: activeUserRef.current?.id
+                });
             }
         };
 
@@ -70,23 +86,25 @@ export const useConversation = (activeUser: User | null) => {
             setChatHistory(prev => prev.map(msg => msg.id === deletedMsg.id ? deletedMsg : msg));
         };
         const handleUserTyping = (data: { userId: string }) => {
-            if (data.userId === activeUser.id) setIsRemoteTyping(true);
+            if (data.userId === activeUserRef.current?.id) setIsRemoteTyping(true);
         };
         const handleUserStopTyping = (data: { userId: string }) => {
-            if (data.userId === activeUser.id) setIsRemoteTyping(false);
+            if (data.userId === activeUserRef.current?.id) setIsRemoteTyping(false);
         };
         const handleUserStatusChange = (data: { userId: string, isOnline: boolean }) => {
-            if (data.userId === activeUser.id && !data.isOnline) setIsRemoteTyping(false);
+            // Logic for status change updates is handled globally in useChatList,
+            // but we update typing status here locally
+            if (data.userId === activeUserRef.current?.id && !data.isOnline) setIsRemoteTyping(false);
         };
         const handleMessagesRead = (data: { conversationId: string, readerId: string }) => {
-            if (data.conversationId === conversationId && data.readerId === activeUser.id) {
+            if (data.conversationId === conversationIdRef.current && data.readerId === activeUserRef.current?.id) {
                 setChatHistory(prev => prev.map(msg => ({ ...msg, isRead: true })));
             }
         };
         const handleRelationshipUpdate = (data: { targetUserId: string, type: string }) => {
-            if (data.targetUserId === activeUser.id || data.targetUserId === currentUser?.id) {
+            if (data.targetUserId === activeUserRef.current?.id || data.targetUserId === currentUser?.id) {
                 api.get('/users').then((res) => {
-                    const updatedUser = res.data.data.users.find((u: User) => u.id === activeUser.id);
+                    const updatedUser = res.data.data.users.find((u: User) => u.id === activeUserRef.current?.id);
                     if (updatedUser) setActiveUser(updatedUser);
                 });
             }
@@ -113,7 +131,9 @@ export const useConversation = (activeUser: User | null) => {
             socket.off("messages_read", handleMessagesRead);
             socket.off("user_relationship_update", handleRelationshipUpdate);
         };
-    }, [socket, activeUser, currentUser, conversationId, setActiveUser]);
+        // KEY FIX: Only re-run if socket changes or the USER ID changes.
+        // Do NOT re-run if 'activeUser' object changes (e.g. status update) or 'conversationId' updates.
+    }, [socket, activeUser?.id, currentUser, setActiveUser]);
 
     // --- ACTIONS ---
     const sendMessage = (e?: React.FormEvent) => {

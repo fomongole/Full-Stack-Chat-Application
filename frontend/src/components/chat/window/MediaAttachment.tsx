@@ -14,7 +14,7 @@ export function MediaAttachment({ url, type, isLocal }: MediaAttachmentProps) {
     const videoRef = useRef<HTMLVideoElement>(null);
 
     const handleDownload = async (e: React.MouseEvent) => {
-        e.stopPropagation(); // Prevents bubbling to container
+        e.stopPropagation(); // Prevents bubbling
         e.preventDefault();
         try {
             const response = await fetch(url);
@@ -31,7 +31,6 @@ export function MediaAttachment({ url, type, isLocal }: MediaAttachmentProps) {
         }
     };
 
-    // --- VIDEO HANDLER ---
     if (type === 'VIDEO') {
         const handlePlayClick = () => {
             if (videoRef.current) {
@@ -49,7 +48,7 @@ export function MediaAttachment({ url, type, isLocal }: MediaAttachmentProps) {
                 <video
                     ref={videoRef}
                     src={url}
-                    controls={isPlaying} // Only show native controls when playing
+                    controls={isPlaying}
                     className="w-full h-full object-contain"
                     onLoadedData={() => setIsLoading(false)}
                     onPause={() => setIsPlaying(false)}
@@ -74,7 +73,6 @@ export function MediaAttachment({ url, type, isLocal }: MediaAttachmentProps) {
         );
     }
 
-    // --- IMAGE HANDLER ---
     return (
         <>
             <div
@@ -111,7 +109,6 @@ export function MediaAttachment({ url, type, isLocal }: MediaAttachmentProps) {
                 )}
             </div>
 
-            {/* Lightbox Modal - FIXED: High Z-index, Propagation Handling */}
             {isExpanded && (
                 <div
                     className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200"
@@ -120,7 +117,6 @@ export function MediaAttachment({ url, type, isLocal }: MediaAttachmentProps) {
                         setIsExpanded(false);
                     }}
                 >
-                    {/* Toolbar - FIXED: High Z-index, Absolute positioning */}
                     <div
                         className="absolute top-6 right-6 flex gap-4 z-[110]"
                         onClick={(e) => e.stopPropagation()}
