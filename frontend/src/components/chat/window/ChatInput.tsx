@@ -87,7 +87,8 @@ export function ChatInput({ value, onChange, onSend, replyTo, onCancelReply, isB
 
     if (isBlocked) {
         return (
-            <footer className="p-4 bg-white dark:bg-zinc-950 text-center z-20 border-t border-zinc-200 dark:border-zinc-800">
+            // FIX: Added safe-area-inset-bottom support
+            <footer className="p-4 bg-white dark:bg-zinc-950 text-center z-20 border-t border-zinc-200 dark:border-zinc-800 pb-[env(safe-area-inset-bottom)]">
                 <div className="bg-zinc-100 dark:bg-zinc-900 p-3 rounded-lg text-zinc-500 text-sm">
                     You cannot send messages to this conversation.
                 </div>
@@ -96,7 +97,8 @@ export function ChatInput({ value, onChange, onSend, replyTo, onCancelReply, isB
     }
 
     return (
-        <footer className="p-3 md:p-4 bg-white dark:bg-zinc-950 border-t border-zinc-100 dark:border-zinc-900 z-20">
+        // This ensures 12px padding on desktop, but expands to cover the home bar on iPhone
+        <footer className="p-3 md:p-4 bg-white dark:bg-zinc-950 border-t border-zinc-100 dark:border-zinc-900 z-20 pb-[max(12px,env(safe-area-inset-bottom))]">
             {/* Reply Preview */}
             {replyTo && !selectedFile && (
                 <div className="mb-2 mx-1 flex items-center justify-between bg-zinc-50 dark:bg-zinc-900 p-2 rounded-lg border-l-4 border-primary shadow-sm animate-in slide-in-from-bottom-2">

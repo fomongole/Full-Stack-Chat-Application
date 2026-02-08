@@ -1,11 +1,12 @@
 'use client';
+
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
 import { useRegisterForm } from '@/hooks/auth/useRegisterForm';
 import { AuthHeader } from '@/components/auth/AuthHeader';
 import { AuthField } from '@/components/auth/AuthField';
-import { Mail, Lock, User, Eye, EyeOff, Check, X } from 'lucide-react';
+import { Mail, Lock, User, Eye, EyeOff, Check } from 'lucide-react';
 
 export default function RegisterPage() {
     const { register, handleSubmit, errors, isSubmitting, watch } = useRegisterForm();

@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, memo } from 'react';
 import { Message } from '@/types';
 import { formatMessageTime } from '@/lib/dateUtils';
-import { useAuthStore } from '@/store/useAuthStore';
 import { MediaAttachment } from './MediaAttachment';
 import { Check, CheckCheck, Trash2, Reply } from 'lucide-react';
 
@@ -19,28 +18,72 @@ interface MessageBubbleProps {
 }
 
 export const MessageBubble = memo(function MessageBubble({ message, isFromMe, isFirstInGroup, isLastInGroup, onReply, onDelete }: MessageBubbleProps) {
-    // const currentUser = useAuthStore(state => state.user);
     const canDelete = isFromMe && !message.isDeleted && !message.isLocal;
+
+    // UI States
+    const [showActionsMobile, setShowActionsMobile] = useState(false);
     const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
-    const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+    // Gestures Refs
+    const touchStartRef = useRef<number>(0);
+    const touchEndRef = useRef<number>(0);
+    const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+    // Auto-hide actions after 3 seconds if tapped on mobile
     useEffect(() => {
-        return () => {
-            if (timeoutRef.current) clearTimeout(timeoutRef.current);
-        };
-    }, []);
+        if (showActionsMobile) {
+            const timer = setTimeout(() => setShowActionsMobile(false), 3000);
+            return () => clearTimeout(timer);
+        }
+    }, [showActionsMobile]);
 
-    const handleDeleteClick = () => {
+    // --- HANDLERS ---
+
+    const handleDeleteClick = (e: React.MouseEvent | React.TouchEvent) => {
+        e.stopPropagation();
         if (isConfirmingDelete) {
             onDelete(message.id);
             setIsConfirmingDelete(false);
         } else {
             setIsConfirmingDelete(true);
-            timeoutRef.current = setTimeout(() => setIsConfirmingDelete(false), 3000);
+            setTimeout(() => setIsConfirmingDelete(false), 3000);
         }
     };
 
-    // --- 1. Bubble Shape Logic ---
+    // 📱 MOBILE GESTURES
+    const handleTouchStart = (e: React.TouchEvent) => {
+        touchStartRef.current = e.targetTouches[0].clientX;
+
+        // Start Long Press Timer
+        longPressTimerRef.current = setTimeout(() => {
+            setShowActionsMobile(true); // Show actions on long press
+            if (navigator.vibrate) navigator.vibrate(50); // Haptic feedback
+        }, 500);
+    };
+
+    const handleTouchMove = (e: React.TouchEvent) => {
+        touchEndRef.current = e.targetTouches[0].clientX;
+        // If moving significantly, cancel long press
+        if (Math.abs(touchStartRef.current - touchEndRef.current) > 10) {
+            if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+        }
+    };
+
+    const handleTouchEnd = () => {
+        if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+
+        // Detect Swipe Right to Reply (>50px)
+        if (touchStartRef.current - touchEndRef.current < -50 && touchEndRef.current !== 0) {
+            onReply(message);
+        }
+
+        // Reset
+        touchStartRef.current = 0;
+        touchEndRef.current = 0;
+    };
+
+
+    // --- STYLES ---
     const myClasses = `bg-primary text-white 
         ${isFirstInGroup ? 'rounded-tr-none' : 'rounded-tr-xl'} 
         ${isLastInGroup ? 'rounded-br-xl' : 'rounded-br-xl'} 
@@ -51,66 +94,70 @@ export const MessageBubble = memo(function MessageBubble({ message, isFromMe, is
         ${isLastInGroup ? 'rounded-bl-xl' : 'rounded-bl-xl'} 
         rounded-r-xl shadow-sm`;
 
-    // --- 2. The Action Buttons Component ---
+    // 🛠️ Action Buttons Component
     const ActionButtons = () => (
         <div className={`
-            flex items-center gap-1.5 px-2 
-            opacity-0 group-hover/row:opacity-100 transition-opacity duration-200 
+            flex items-center gap-1.5 px-2 transition-opacity duration-200 
             ${isFromMe ? 'justify-end' : 'justify-start'}
+            ${showActionsMobile ? 'opacity-100' : 'opacity-0 md:group-hover/row:opacity-100'} 
         `}>
             {/* Reply */}
             <button
-                onClick={() => onReply(message)}
-                className="p-1.5 text-zinc-400 hover:text-primary hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors"
+                onClick={(e) => { e.stopPropagation(); onReply(message); }}
+                className="p-2 md:p-1.5 text-zinc-400 hover:text-primary hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors bg-white/50 md:bg-transparent shadow-sm md:shadow-none"
                 title="Reply"
             >
-                <Reply className="w-4 h-4" />
+                <Reply className="w-5 h-5 md:w-4 md:h-4" />
             </button>
 
             {/* Delete */}
             {canDelete && (
                 <button
                     onClick={handleDeleteClick}
-                    className={`p-1.5 rounded-full transition-colors flex items-center gap-1 ${
+                    className={`p-2 md:p-1.5 rounded-full transition-colors flex items-center gap-1 bg-white/50 md:bg-transparent shadow-sm md:shadow-none ${
                         isConfirmingDelete
                             ? "bg-red-50 text-red-600 dark:bg-red-900/20"
                             : "text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10"
                     }`}
                     title="Delete"
                 >
-                    <Trash2 className="w-4 h-4" />
-                    {isConfirmingDelete && <span className="text-[10px] font-bold uppercase">Confirm</span>}
+                    <Trash2 className="w-5 h-5 md:w-4 md:h-4" />
+                    {isConfirmingDelete && <span className="text-[10px] font-bold uppercase hidden md:inline">Confirm</span>}
                 </button>
             )}
         </div>
     );
 
-    // --- 3. Render Layout ---
     return (
-        <div className={`
-            group/row flex w-full 
-            ${isFromMe ? 'justify-end' : 'justify-start'} 
-            ${isLastInGroup ? 'mb-3' : 'mb-0.5'}
-            animate-in fade-in zoom-in-95 duration-200
-        `}>
-            {/* FLEX CONTAINER: Keeps buttons and bubble side-by-side */}
+        <div
+            className={`
+                group/row flex w-full 
+                ${isFromMe ? 'justify-end' : 'justify-start'} 
+                ${isLastInGroup ? 'mb-3' : 'mb-0.5'}
+                animate-in fade-in zoom-in-95 duration-200 select-none
+            `}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+        >
             <div className={`
                 flex items-end gap-1 max-w-[95%] md:max-w-[85%]
                 ${isFromMe ? 'flex-row' : 'flex-row-reverse'} 
             `}>
 
-                {/* SIDE A: Action Buttons (Left for Me, Right for Them via flex-row-reverse) */}
                 <ActionButtons />
 
-                {/* SIDE B: The Actual Bubble */}
-                <div className={`
-                    relative overflow-hidden flex-1
-                    ${isFromMe ? myClasses : theirClasses}
-                    ${message.isLocal ? 'opacity-90' : 'opacity-100'} 
-                    transition-all duration-200
-                `}>
+                {/* THE BUBBLE */}
+                <div
+                    onClick={() => setShowActionsMobile(!showActionsMobile)} // Toggle actions on simple tap too
+                    className={`
+                        relative overflow-hidden flex-1
+                        ${isFromMe ? myClasses : theirClasses}
+                        ${message.isLocal ? 'opacity-90' : 'opacity-100'} 
+                        transition-all duration-200 cursor-pointer active:scale-[0.98]
+                    `}
+                >
 
-                    {/* Reply Context (Inside Bubble) */}
                     {message.replyTo && (
                         <div className={`m-1 p-2 rounded-lg text-xs border-l-4 mb-1 ${
                             isFromMe
@@ -124,7 +171,6 @@ export const MessageBubble = memo(function MessageBubble({ message, isFromMe, is
                         </div>
                     )}
 
-                    {/* Media Content */}
                     {!message.isDeleted && message.attachmentUrl && (
                         <div className="p-1 pb-0">
                             <MediaAttachment
@@ -135,7 +181,6 @@ export const MessageBubble = memo(function MessageBubble({ message, isFromMe, is
                         </div>
                     )}
 
-                    {/* Text & Meta */}
                     <div className={`
                         flex flex-wrap items-end gap-2 px-3 py-1.5
                         ${!message.message && message.attachmentUrl ? 'pb-2' : ''}
@@ -147,7 +192,7 @@ export const MessageBubble = memo(function MessageBubble({ message, isFromMe, is
                             </span>
                         )}
 
-                        <span className={`text-[10px] ml-auto flex items-center gap-1 whitespace-nowrap ${isFromMe ? 'text-white/70' : 'text-zinc-400'} pt-1 select-none`}>
+                        <span className={`text-[10px] ml-auto flex items-center gap-1 whitespace-nowrap ${isFromMe ? 'text-white/70' : 'text-zinc-400'} pt-1`}>
                             {message.isLocal ? "Sending..." : formatMessageTime(message.timestamp)}
                             {isFromMe && !message.isDeleted && !message.isLocal && (
                                 <span title={message.isRead ? "Read" : "Sent"}>
@@ -157,7 +202,6 @@ export const MessageBubble = memo(function MessageBubble({ message, isFromMe, is
                         </span>
                     </div>
                 </div>
-
             </div>
         </div>
     );

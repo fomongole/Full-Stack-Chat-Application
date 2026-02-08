@@ -30,14 +30,12 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
     };
 
     return (
-        <div className="flex h-[100dvh] overflow-hidden bg-white dark:bg-black">
-            {/* SIDEBAR:
-               - Desktop (md+): Always visible (w-[380px])
-               - Mobile: Visible ONLY if no active user is selected
-            */}
+        // Using 100dvh (Dynamic Viewport Height) to handle mobile browser bars correctly
+        <div className="flex h-[100dvh] overflow-hidden bg-white dark:bg-black touch-none overscroll-none">
+            {/* SIDEBAR */}
             <div className={`
                 ${activeUser ? 'hidden md:flex' : 'flex'} 
-                w-full md:w-[380px] flex-col bg-white dark:bg-[#111b21] z-20
+                w-full md:w-[380px] flex-col bg-white dark:bg-[#111b21] z-20 border-r border-zinc-200 dark:border-zinc-800
             `}>
                 <ChatSidebar
                     users={users}
@@ -48,15 +46,12 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
                 />
             </div>
 
-            {/* MAIN CHAT AREA:
-               - Desktop: Always visible
-               - Mobile: Visible ONLY if active user is selected
-            */}
+            {/* MAIN CHAT AREA */}
             <main className={`
                 ${activeUser ? 'flex' : 'hidden md:flex'} 
-                flex-1 flex-col relative bg-[#efeae2] dark:bg-[#0b141a]
+                flex-1 flex-col relative bg-[#efeae2] dark:bg-[#0b141a] w-full
             `}>
-                {/* Background Pattern Layer (WhatsApp Style) */}
+                {/* Background Pattern */}
                 <div className="absolute inset-0 opacity-[0.06] dark:opacity-[0.03] pointer-events-none bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')]"></div>
 
                 {children}

@@ -20,7 +20,6 @@ export default function ChatPage() {
 
     if (!activeUser) return (
         <div className="flex-1 flex flex-col items-center justify-center h-full bg-[#f0f2f5] dark:bg-[#111b21] border-b-[6px] border-green-500">
-            {/* WhatsApp Web Style Welcome Screen */}
             <div className="max-w-md text-center p-8">
                 <div className="relative w-64 h-64 mx-auto mb-8 overflow-hidden rounded-full shadow-sm">
                     <img
@@ -42,21 +41,21 @@ export default function ChatPage() {
 
     return (
         <div className="flex flex-col h-full w-full relative z-10">
-            <ChatHeader user={activeUser} isTyping={isRemoteTyping} />
+            {/* 1. HEADER: Flex-none ensures it never shrinks or scrolls away */}
+            <div className="flex-none">
+                <ChatHeader user={activeUser} isTyping={isRemoteTyping} />
+            </div>
 
-            <div className="flex-1 overflow-y-auto p-4 md:px-8 md:py-4 space-y-1 custom-scrollbar">
+            {/* 2. MESSAGES: Flex-1 + Overflow-y-auto makes ONLY this part scroll */}
+            <div className="flex-1 overflow-y-auto p-4 md:px-8 md:py-4 space-y-1 custom-scrollbar overscroll-contain">
                 {chatHistory.map((msg, i) => {
                     const isFromMe = msg.username !== activeUser.username;
-
-                    // --- BUBBLE GROUPING LOGIC ---
                     const previousMsg = chatHistory[i - 1];
                     const nextMsg = chatHistory[i + 1];
 
-                    // It is first if: No previous msg OR Previous msg is from different user OR Previous msg was a date separator away
                     const isFirstInGroup = !previousMsg || previousMsg.username !== msg.username ||
                         getMessageDateLabel(msg.timestamp) !== getMessageDateLabel(previousMsg.timestamp);
 
-                    // It is last if: No next msg OR Next msg is from different user
                     const isLastInGroup = !nextMsg || nextMsg.username !== msg.username;
 
                     const showDateHeader = i === 0 ||
@@ -86,16 +85,19 @@ export default function ChatPage() {
                 <div ref={scrollRef} />
             </div>
 
-            <ChatInput
-                value={message}
-                onChange={setMessage}
-                onSend={sendMessage}
-                onUploadMedia={sendMediaMessage}
-                recipientName={activeUser.username}
-                replyTo={replyTo}
-                onCancelReply={() => setReplyTo(null)}
-                isBlocked={isBlocked}
-            />
+            {/* 3. INPUT: Flex-none ensures it sticks to bottom */}
+            <div className="flex-none">
+                <ChatInput
+                    value={message}
+                    onChange={setMessage}
+                    onSend={sendMessage}
+                    onUploadMedia={sendMediaMessage}
+                    recipientName={activeUser.username}
+                    replyTo={replyTo}
+                    onCancelReply={() => setReplyTo(null)}
+                    isBlocked={isBlocked}
+                />
+            </div>
         </div>
     );
 }
