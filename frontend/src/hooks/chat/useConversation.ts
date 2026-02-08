@@ -27,8 +27,9 @@ export const useConversation = (activeUser: User | null) => {
     // GUARD: Prevents a single message from being counted twice
     const countedMessageIds = useRef<Set<string>>(new Set());
 
-    // FLAG: Prevents auto-scroll when an update is caused by deletion
+    // FLAGS: To control scroll behavior during specific updates
     const isDeletingRef = useRef(false);
+    const isPaginatingRef = useRef(false); // Added to block auto-scroll during history load
 
     const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const lastTypingEmitRef = useRef<number>(0);
@@ -63,17 +64,20 @@ export const useConversation = (activeUser: User | null) => {
         const container = containerRef.current;
         if (!container) return;
 
+        // 1. Initial Load: Always scroll to bottom
         if (isInitialLoad.current) {
             scrollToBottom('auto');
             isInitialLoad.current = false;
             return;
         }
 
+        // 2. If WE sent the message: Always scroll to bottom
         if (newMsgAuthorId === currentUser?.id) {
             scrollToBottom('smooth');
             return;
         }
 
+        // 3. Incoming message: Only scroll if user is already near the bottom
         const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150;
         if (isNearBottom) {
             scrollToBottom('smooth');
@@ -84,7 +88,8 @@ export const useConversation = (activeUser: User | null) => {
         if (!socket || !conversationId || !hasMore || isLoadingMore || chatHistory.length === 0) return;
 
         setIsLoadingMore(true);
-        // We use the ID of the top-most (oldest) message as our cursor
+        isPaginatingRef.current = true; // FIXED: Set flag before emitting
+
         const oldestMessageId = chatHistory[0].id;
         socket.emit("load_more_messages", { conversationId, cursor: oldestMessageId });
     }, [socket, conversationId, hasMore, isLoadingMore, chatHistory]);
@@ -93,7 +98,7 @@ export const useConversation = (activeUser: User | null) => {
         const container = containerRef.current;
         if (!container) return;
 
-        // PAGINATION TRIGGER: User scrolls near the top (50px threshold)
+        // PAGINATION TRIGGER
         if (container.scrollTop < 50 && hasMore && !isLoadingMore) {
             loadMoreMessages();
         }
@@ -110,14 +115,15 @@ export const useConversation = (activeUser: User | null) => {
             isInitialLoad.current = true;
             setUnreadBelowCount(0);
             countedMessageIds.current.clear();
-            setHasMore(false); // Reset pagination for new conversation
+            setHasMore(false);
         }
     }, [activeUser?.id]);
 
+    // MAIN AUTO-SCROLL EFFECT
     useEffect(() => {
-        // If this update was caused by a deletion, DO NOT auto-scroll.
-        if (isDeletingRef.current) {
-            isDeletingRef.current = false; // Reset the flag
+        // Explicitly block auto-scroll if we are paginating or deleting
+        if (isDeletingRef.current || isPaginatingRef.current) {
+            // We don't reset isPaginatingRef here because the layoutEffect needs it too
             return;
         }
 
@@ -126,20 +132,27 @@ export const useConversation = (activeUser: User | null) => {
         }
     }, [chatHistory, isLoadingHistory, isLoadingMore, handleAutoScroll]);
 
-    // Fix for deletion scroll: Adjust after render
+    // SCROLL ANCHORING & ADJUSTMENTS
     useLayoutEffect(() => {
         const container = containerRef.current;
-        if (container && deleteAdjustment.current) {
+        if (!container) return;
+
+        // Handle deletion scroll fix
+        if (deleteAdjustment.current) {
             const { oldHeight, oldScrollTop } = deleteAdjustment.current;
             const newHeight = container.scrollHeight;
-
-            // Only adjust if height actually changed
             if (newHeight !== oldHeight && oldScrollTop > 0) {
                 container.scrollTop = oldScrollTop + (newHeight - oldHeight);
             }
             deleteAdjustment.current = null;
+            isDeletingRef.current = false;
         }
-    }, [chatHistory]);
+
+        // Ensure flag is reset after history is rendered
+        if (isPaginatingRef.current && !isLoadingMore) {
+            isPaginatingRef.current = false;
+        }
+    }, [chatHistory, isLoadingMore]);
 
     // ----------------------------------------------------
     // SOCKET LISTENERS
@@ -170,11 +183,14 @@ export const useConversation = (activeUser: User | null) => {
             const container = containerRef.current;
             const previousScrollHeight = container?.scrollHeight || 0;
 
+            // Prepend new messages
             setChatHistory(prev => [...data.messages, ...prev]);
             setHasMore(data.hasMore);
             setIsLoadingMore(false);
 
-            // SCROLL ANCHORING: Keep the user's view fixed while prepending messages
+            // SCROLL ANCHORING LOGIC
+            // By doing this here and using the isPaginatingRef flag,
+            // we override the auto-scroll-to-bottom.
             requestAnimationFrame(() => {
                 if (container) {
                     container.scrollTop = container.scrollHeight - previousScrollHeight;
@@ -212,18 +228,13 @@ export const useConversation = (activeUser: User | null) => {
 
         const handleMessageDeleted = (deletedMsg: Message) => {
             const container = containerRef.current;
-
-            // 1. SET FLAG TO BLOCK AUTO-SCROLL
             isDeletingRef.current = true;
-
             if (container) {
-                // Save before update for useLayoutEffect
                 deleteAdjustment.current = {
                     oldHeight: container.scrollHeight,
                     oldScrollTop: container.scrollTop
                 };
             }
-
             setChatHistory(prev => prev.map(msg => msg.id === deletedMsg.id ? deletedMsg : msg));
         };
 
