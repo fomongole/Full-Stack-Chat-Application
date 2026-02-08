@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Play, Download, Maximize2 } from 'lucide-react';
+import { X, Play, Download, Maximize2, Volume2, VolumeX } from 'lucide-react';
 
 interface MediaAttachmentProps {
     url: string;
@@ -13,26 +13,21 @@ export function MediaAttachment({ url, type, isLocal }: MediaAttachmentProps) {
     const [isLoading, setIsLoading] = useState(true);
     const [isExpanded, setIsExpanded] = useState(false);
     const [isPlaying, setIsPlaying] = useState(false);
+    const [isMuted, setIsMuted] = useState(false);
     const [mounted, setMounted] = useState(false);
     const videoRef = useRef<HTMLVideoElement>(null);
 
-    // Hydration fix for Portal
-    useEffect(() => {
-        setMounted(true);
-    }, []);
+    useEffect(() => { setMounted(true); }, []);
 
     const handleDownload = async (e: React.MouseEvent) => {
         e.stopPropagation();
-        e.preventDefault();
-
         try {
             const response = await fetch(url);
             const blob = await response.blob();
             const blobUrl = window.URL.createObjectURL(blob);
-
             const link = document.createElement('a');
             link.href = blobUrl;
-            link.download = `attachment-${Date.now()}.${type === 'VIDEO' ? 'mp4' : 'jpg'}`;
+            link.download = `media-${Date.now()}.${type === 'VIDEO' ? 'mp4' : 'jpg'}`;
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
@@ -42,7 +37,7 @@ export function MediaAttachment({ url, type, isLocal }: MediaAttachmentProps) {
         }
     };
 
-    const toggleVideo = (e: React.MouseEvent) => {
+    const togglePlay = (e: React.MouseEvent) => {
         e.stopPropagation();
         if (videoRef.current) {
             if (videoRef.current.paused) {
@@ -55,125 +50,92 @@ export function MediaAttachment({ url, type, isLocal }: MediaAttachmentProps) {
         }
     };
 
-    // --- RENDER VIDEO THUMBNAIL ---
-    if (type === 'VIDEO') {
-        return (
-            <div className="relative rounded-lg overflow-hidden bg-black max-w-sm w-full aspect-video group/video border border-zinc-200 dark:border-zinc-800">
-                <video
-                    ref={videoRef}
-                    src={url}
-                    className="w-full h-full object-contain"
-                    onLoadedData={() => setIsLoading(false)}
-                    onPause={() => setIsPlaying(false)}
-                    onPlay={() => setIsPlaying(true)}
-                />
-                {!isPlaying && !isLoading && !isLocal && (
-                    <div
-                        onClick={toggleVideo}
-                        className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover/video:bg-black/40 transition-all cursor-pointer z-10"
-                    >
-                        <div className="w-12 h-12 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center border border-white/40 shadow-lg group-hover/video:scale-110 transition-transform">
-                            <Play className="w-5 h-5 text-white fill-white ml-1" />
-                        </div>
-                    </div>
-                )}
-            </div>
-        );
-    }
-
-    // --- FULL SCREEN MODAL (PORTAL) ---
-    // This renders outside the Chat DOM tree, directly into document.body
-    const FullScreenModal = () => {
+    // --- FULL SCREEN MEDIA PORTAL ---
+    const MediaOverlay = () => {
         if (!mounted) return null;
-
         return createPortal(
             <div
-                className="fixed inset-0 z-[9999] bg-black/95 backdrop-blur-xl flex items-center justify-center animate-in fade-in duration-200 touch-none"
-                onClick={(e) => {
-                    e.stopPropagation();
-                    setIsExpanded(false);
-                }}
+                className="fixed inset-0 z-[9999] bg-black/95 backdrop-blur-xl flex flex-col animate-in fade-in duration-300"
+                onClick={() => setIsExpanded(false)}
             >
-                {/* TOOLBAR - Explicit High Z-Index */}
-                <div
-                    className="absolute top-0 left-0 right-0 p-4 flex justify-end gap-4 z-[10000]"
-                    onClick={(e) => e.stopPropagation()} // Prevent closing when clicking toolbar area
-                >
-                    <button
-                        onClick={handleDownload}
-                        className="p-3 bg-white/10 hover:bg-white/20 text-white/90 hover:text-white rounded-full transition-all backdrop-blur-md border border-white/10 shadow-lg"
-                        title="Download"
-                    >
-                        <Download className="w-6 h-6" />
-                    </button>
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            setIsExpanded(false);
-                        }}
-                        className="p-3 bg-white/10 hover:bg-red-500/80 text-white/90 hover:text-white rounded-full transition-all backdrop-blur-md border border-white/10 shadow-lg"
-                        title="Close"
-                    >
-                        <X className="w-6 h-6" />
-                    </button>
+                {/* Header Controls */}
+                <div className="flex justify-between items-center p-4 z-10 bg-gradient-to-b from-black/50 to-transparent">
+                    <span className="text-white text-sm font-medium">Attachment</span>
+                    <div className="flex items-center gap-3">
+                        <button onClick={handleDownload} className="p-2.5 bg-white/10 hover:bg-white/20 rounded-full text-white transition-all">
+                            <Download className="w-5 h-5" />
+                        </button>
+                        <button onClick={() => setIsExpanded(false)} className="p-2.5 bg-red-500/80 hover:bg-red-500 rounded-full text-white transition-all">
+                            <X className="w-5 h-5" />
+                        </button>
+                    </div>
                 </div>
 
-                {/* IMAGE */}
-                <div
-                    className="relative w-full h-full flex items-center justify-center p-4 md:p-10"
-                    onClick={(e) => e.stopPropagation()} // Prevent close on image click
-                >
-                    <img
-                        src={url}
-                        alt="Full size"
-                        className="max-w-full max-h-full object-contain rounded-md shadow-2xl animate-in zoom-in-95 duration-300"
-                    />
+                {/* Content */}
+                <div className="flex-1 flex items-center justify-center p-2" onClick={(e) => e.stopPropagation()}>
+                    {type === 'VIDEO' ? (
+                        <video
+                            src={url}
+                            controls
+                            autoPlay
+                            className="max-w-full max-h-[80vh] shadow-2xl rounded-lg"
+                        />
+                    ) : (
+                        <img src={url} alt="Full view" className="max-w-full max-h-[85vh] object-contain shadow-2xl animate-in zoom-in-95 duration-300" />
+                    )}
                 </div>
             </div>,
             document.body
         );
     };
 
-    // --- IMAGE THUMBNAIL (IN CHAT) ---
+    if (type === 'VIDEO') {
+        return (
+            <>
+                <div className="relative rounded-lg overflow-hidden bg-zinc-900 aspect-video group/video border border-zinc-800">
+                    <video
+                        src={url}
+                        className="w-full h-full object-cover opacity-80"
+                        onLoadedData={() => setIsLoading(false)}
+                    />
+                    <div
+                        onClick={(e) => { e.stopPropagation(); setIsExpanded(true); }}
+                        className="absolute inset-0 flex items-center justify-center cursor-pointer group-hover/video:bg-black/20 transition-all z-10"
+                    >
+                        <div className="w-12 h-12 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center border border-white/40 shadow-lg group-hover/video:scale-110 transition-transform">
+                            <Play className="w-6 h-6 text-white fill-white ml-1" />
+                        </div>
+                    </div>
+                </div>
+                {isExpanded && <MediaOverlay />}
+            </>
+        );
+    }
+
     return (
         <>
             <div
-                onClick={(e) => {
-                    e.stopPropagation();
-                    if (!isLocal) setIsExpanded(true);
-                }}
-                className={`
-                    relative rounded-lg overflow-hidden bg-zinc-100 dark:bg-zinc-800 
-                    cursor-pointer group/image border border-zinc-200 dark:border-zinc-800
-                    ${isLoading ? 'min-h-[200px]' : ''}
-                `}
+                onClick={(e) => { e.stopPropagation(); if (!isLocal) setIsExpanded(true); }}
+                className={`relative rounded-lg overflow-hidden bg-zinc-100 dark:bg-zinc-800 cursor-pointer group/image border border-zinc-200 dark:border-zinc-800 ${isLoading ? 'min-h-[150px]' : ''}`}
             >
                 <img
                     src={url}
                     alt="Attachment"
-                    className={`
-                        w-full h-auto max-h-[400px] object-cover rounded-lg
-                        transition-all duration-500 ease-in-out
-                        ${isLoading ? 'scale-110 blur-xl grayscale' : 'scale-100 blur-0 grayscale-0'}
-                    `}
+                    className={`w-full h-auto max-h-[400px] object-cover transition-all duration-500 ${isLoading ? 'scale-110 blur-xl grayscale' : 'scale-100'}`}
                     onLoad={() => setIsLoading(false)}
-                    loading="lazy"
                 />
-
                 {isLocal && (
                     <div className="absolute inset-0 bg-black/40 flex items-center justify-center backdrop-blur-[2px]">
                         <div className="w-8 h-8 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
                     </div>
                 )}
-
                 {!isLoading && !isLocal && (
                     <div className="absolute inset-0 bg-black/0 group-hover/image:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover/image:opacity-100">
                         <Maximize2 className="w-6 h-6 text-white drop-shadow-md" />
                     </div>
                 )}
             </div>
-
-            {isExpanded && <FullScreenModal />}
+            {isExpanded && <MediaOverlay />}
         </>
     );
 }

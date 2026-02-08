@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, memo } from 'react';
+import { motion, useMotionValue, useTransform } from 'framer-motion';
 import { Message } from '@/types';
 import { formatMessageTime } from '@/lib/dateUtils';
 import { MediaAttachment } from './MediaAttachment';
-import { Check, CheckCheck, Trash2, Reply } from 'lucide-react';
+import { Check, CheckCheck, Trash2, Reply as ReplyIcon } from 'lucide-react';
 
 interface ExtendedMessage extends Message {
     isLocal?: boolean;
@@ -24,22 +25,12 @@ export const MessageBubble = memo(function MessageBubble({ message, isFromMe, is
     const [showActionsMobile, setShowActionsMobile] = useState(false);
     const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
 
-    // Gestures Refs
-    const touchStartRef = useRef<number>(0);
-    const touchEndRef = useRef<number>(0);
-    const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
+    // Framer Motion Drag values
+    const dragX = useMotionValue(0);
+    const replyIconOpacity = useTransform(dragX, [0, 60], [0, 1]);
+    const replyIconScale = useTransform(dragX, [0, 60], [0.5, 1.2]);
 
-    // Auto-hide actions after 3 seconds if tapped on mobile
-    useEffect(() => {
-        if (showActionsMobile) {
-            const timer = setTimeout(() => setShowActionsMobile(false), 3000);
-            return () => clearTimeout(timer);
-        }
-    }, [showActionsMobile]);
-
-    // --- HANDLERS ---
-
-    const handleDeleteClick = (e: React.MouseEvent | React.TouchEvent) => {
+    const handleDeleteClick = (e: React.MouseEvent) => {
         e.stopPropagation();
         if (isConfirmingDelete) {
             onDelete(message.id);
@@ -50,115 +41,74 @@ export const MessageBubble = memo(function MessageBubble({ message, isFromMe, is
         }
     };
 
-    // 📱 MOBILE GESTURES
-    const handleTouchStart = (e: React.TouchEvent) => {
-        touchStartRef.current = e.targetTouches[0].clientX;
-
-        // Start Long Press Timer
-        longPressTimerRef.current = setTimeout(() => {
-            setShowActionsMobile(true); // Show actions on long press
-            if (navigator.vibrate) navigator.vibrate(50); // Haptic feedback
-        }, 500);
-    };
-
-    const handleTouchMove = (e: React.TouchEvent) => {
-        touchEndRef.current = e.targetTouches[0].clientX;
-        // If moving significantly, cancel long press
-        if (Math.abs(touchStartRef.current - touchEndRef.current) > 10) {
-            if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
-        }
-    };
-
-    const handleTouchEnd = () => {
-        if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
-
-        // Detect Swipe Right to Reply (>50px)
-        if (touchStartRef.current - touchEndRef.current < -50 && touchEndRef.current !== 0) {
+    const handleDragEnd = (_: any, info: any) => {
+        // Threshold for reply: 70px
+        if (info.offset.x > 70 && !message.isDeleted) {
             onReply(message);
+            if (navigator.vibrate) navigator.vibrate(50); // Haptic feedback
         }
-
-        // Reset
-        touchStartRef.current = 0;
-        touchEndRef.current = 0;
     };
 
-
-    // --- STYLES ---
     const myClasses = `bg-primary text-white 
         ${isFirstInGroup ? 'rounded-tr-none' : 'rounded-tr-xl'} 
-        ${isLastInGroup ? 'rounded-br-xl' : 'rounded-br-xl'} 
-        rounded-l-xl shadow-sm`;
+        rounded-l-xl rounded-br-xl shadow-sm`;
 
     const theirClasses = `bg-white dark:bg-[#202c33] border border-zinc-100 dark:border-zinc-800 text-zinc-900 dark:text-zinc-100
         ${isFirstInGroup ? 'rounded-tl-none' : 'rounded-tl-xl'} 
-        ${isLastInGroup ? 'rounded-bl-xl' : 'rounded-bl-xl'} 
-        rounded-r-xl shadow-sm`;
-
-    // 🛠️ Action Buttons Component
-    const ActionButtons = () => (
-        <div className={`
-            flex items-center gap-1.5 px-2 transition-opacity duration-200 
-            ${isFromMe ? 'justify-end' : 'justify-start'}
-            ${showActionsMobile ? 'opacity-100' : 'opacity-0 md:group-hover/row:opacity-100'} 
-        `}>
-            {/* Reply */}
-            <button
-                onClick={(e) => { e.stopPropagation(); onReply(message); }}
-                className="p-2 md:p-1.5 text-zinc-400 hover:text-primary hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors bg-white/50 md:bg-transparent shadow-sm md:shadow-none"
-                title="Reply"
-            >
-                <Reply className="w-5 h-5 md:w-4 md:h-4" />
-            </button>
-
-            {/* Delete */}
-            {canDelete && (
-                <button
-                    onClick={handleDeleteClick}
-                    className={`p-2 md:p-1.5 rounded-full transition-colors flex items-center gap-1 bg-white/50 md:bg-transparent shadow-sm md:shadow-none ${
-                        isConfirmingDelete
-                            ? "bg-red-50 text-red-600 dark:bg-red-900/20"
-                            : "text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10"
-                    }`}
-                    title="Delete"
-                >
-                    <Trash2 className="w-5 h-5 md:w-4 md:h-4" />
-                    {isConfirmingDelete && <span className="text-[10px] font-bold uppercase hidden md:inline">Confirm</span>}
-                </button>
-            )}
-        </div>
-    );
+        rounded-r-xl rounded-bl-xl shadow-sm`;
 
     return (
-        <div
-            className={`
-                group/row flex w-full 
-                ${isFromMe ? 'justify-end' : 'justify-start'} 
-                ${isLastInGroup ? 'mb-3' : 'mb-0.5'}
-                animate-in fade-in zoom-in-95 duration-200 select-none
-            `}
-            onTouchStart={handleTouchStart}
-            onTouchMove={handleTouchMove}
-            onTouchEnd={handleTouchEnd}
-        >
-            <div className={`
-                flex items-end gap-1 max-w-[95%] md:max-w-[85%]
-                ${isFromMe ? 'flex-row' : 'flex-row-reverse'} 
-            `}>
+        <div className={`group/row flex w-full relative ${isFromMe ? 'justify-end' : 'justify-start'} ${isLastInGroup ? 'mb-3' : 'mb-0.5'} px-2 overflow-hidden`}>
 
-                <ActionButtons />
+            {/* REPLY ICON REVEAL ON SLIDE */}
+            {!isFromMe && !message.isDeleted && (
+                <motion.div
+                    style={{ opacity: replyIconOpacity, scale: replyIconScale }}
+                    className="absolute left-6 top-1/2 -translate-y-1/2 text-primary z-0"
+                >
+                    <ReplyIcon className="w-6 h-6" />
+                </motion.div>
+            )}
+
+            <motion.div
+                drag={!message.isDeleted ? "x" : false}
+                dragConstraints={{ left: 0, right: 100 }}
+                dragElastic={0.1}
+                onDragEnd={handleDragEnd}
+                style={{ x: dragX }}
+                className={`flex items-end gap-1 max-w-[95%] md:max-w-[85%] z-10 ${isFromMe ? 'flex-row' : 'flex-row-reverse'}`}
+            >
+                {/* ACTIONS (Desktop & Tap) */}
+                <div className={`flex items-center gap-1.5 px-1 transition-opacity duration-200 ${isFromMe ? 'justify-end' : 'justify-start'} ${showActionsMobile ? 'opacity-100' : 'opacity-0 md:group-hover/row:opacity-100'}`}>
+                    {!message.isDeleted && (
+                        <button
+                            onClick={(e) => { e.stopPropagation(); onReply(message); setShowActionsMobile(false); }}
+                            className="p-1.5 text-zinc-400 hover:text-primary hover:bg-black/5 dark:hover:bg-white/5 rounded-full"
+                        >
+                            <ReplyIcon className="w-4 h-4" />
+                        </button>
+                    )}
+                    {canDelete && (
+                        <button
+                            onClick={handleDeleteClick}
+                            className={`p-1.5 rounded-full transition-colors ${isConfirmingDelete ? "bg-red-50 text-red-600" : "text-zinc-400 hover:text-red-500 hover:bg-red-50"}`}
+                        >
+                            <Trash2 className="w-4 h-4" />
+                        </button>
+                    )}
+                </div>
 
                 {/* THE BUBBLE */}
                 <div
-                    onClick={() => setShowActionsMobile(!showActionsMobile)} // Toggle actions on simple tap too
+                    onClick={() => !message.isDeleted && setShowActionsMobile(!showActionsMobile)}
                     className={`
-                        relative overflow-hidden flex-1
+                        relative overflow-hidden flex-1 transition-all duration-200 cursor-pointer active:scale-[0.98]
                         ${isFromMe ? myClasses : theirClasses}
-                        ${message.isLocal ? 'opacity-90' : 'opacity-100'} 
-                        transition-all duration-200 cursor-pointer active:scale-[0.98]
+                        ${message.isLocal ? 'opacity-70' : 'opacity-100'}
+                        ${message.isDeleted ? 'opacity-50 border-dashed border-2' : ''}
                     `}
                 >
-
-                    {message.replyTo && (
+                    {message.replyTo && !message.isDeleted && (
                         <div className={`m-1 p-2 rounded-lg text-xs border-l-4 mb-1 ${
                             isFromMe
                                 ? 'bg-black/20 border-white/50 text-white/90'
@@ -181,14 +131,10 @@ export const MessageBubble = memo(function MessageBubble({ message, isFromMe, is
                         </div>
                     )}
 
-                    <div className={`
-                        flex flex-wrap items-end gap-2 px-3 py-1.5
-                        ${!message.message && message.attachmentUrl ? 'pb-2' : ''}
-                    `}>
+                    <div className="flex flex-wrap items-end gap-2 px-3 py-1.5">
                         {(message.message || message.isDeleted) && (
                             <span className={`text-[15px] leading-relaxed break-words max-w-full ${message.isDeleted ? "italic opacity-60 text-sm" : ""}`}>
-                                {message.isDeleted && <span className="inline-flex items-center gap-1 mr-1 text-xs">🚫</span>}
-                                {message.message}
+                                {message.isDeleted ? "🚫 This message was deleted" : message.message}
                             </span>
                         )}
 
@@ -196,13 +142,13 @@ export const MessageBubble = memo(function MessageBubble({ message, isFromMe, is
                             {message.isLocal ? "Sending..." : formatMessageTime(message.timestamp)}
                             {isFromMe && !message.isDeleted && !message.isLocal && (
                                 <span title={message.isRead ? "Read" : "Sent"}>
-                                    {message.isRead ? <CheckCheck className="w-3.5 h-3.5 text-white/90" /> : <Check className="w-3.5 h-3.5 text-white/60" />}
+                                    {message.isRead ? <CheckCheck className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />}
                                 </span>
                             )}
                         </span>
                     </div>
                 </div>
-            </div>
+            </motion.div>
         </div>
     );
 }, (prev, next) => {
