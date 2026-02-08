@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'; // Import useRef
 import { api } from '@/lib/api';
 import { useSocket } from '@/hooks/useSocket';
 import { useChatStore } from '@/store/useChatStore';
@@ -10,28 +10,29 @@ export const useChatList = (enableUpdates = true) => {
     const [isLoading, setIsLoading] = useState(true);
     const [, setTick] = useState(0);
 
+    // 1. REF TO TRACK USERS INSTANTLY
+    const usersRef = useRef<User[]>([]);
+
     const socket = useSocket();
     const setActiveUser = useChatStore((state) => state.setActiveUser);
     const selectedUser = useChatStore((state) => state.activeUser);
 
-    // --- DEDUPLICATION & SORTING ---
+    // 2. KEEP REF SYNCED WITH STATE
+    useEffect(() => {
+        usersRef.current = rawUsers;
+    }, [rawUsers]);
+
     const users = useMemo(() => {
-        // 1. Create a Map to enforce unique IDs (last one wins)
         const uniqueUsersMap = new Map<string, User>();
         rawUsers.forEach((user) => {
             uniqueUsersMap.set(user.id, user);
         });
-
-        // 2. Convert back to array
         const uniqueUsers = Array.from(uniqueUsersMap.values());
 
-        // 3. Sort by Activity and Online Status
         return uniqueUsers.sort((a, b) => {
             const timeA = new Date(a.lastActivity || 0).getTime();
             const timeB = new Date(b.lastActivity || 0).getTime();
-            // Sort by most recent message/activity first
             if (timeB !== timeA) return timeB - timeA;
-            // Then by online status
             if (a.isOnline !== b.isOnline) return a.isOnline ? -1 : 1;
             return 0;
         });
@@ -43,7 +44,9 @@ export const useChatList = (enableUpdates = true) => {
 
     const fetchUsers = useCallback(async () => {
         try {
-            setIsLoading(true);
+            // Only show loading on FIRST load, not background refreshes
+            if (usersRef.current.length === 0) setIsLoading(true);
+
             const response = await api.get('/users');
             setRawUsers(response.data.data.users);
         } catch (error) {
@@ -53,12 +56,11 @@ export const useChatList = (enableUpdates = true) => {
         }
     }, []);
 
-    // Initial Fetch
     useEffect(() => {
         fetchUsers();
     }, [fetchUsers]);
 
-    // INSTANT READ RESET: When active user changes, clear unread count locally
+    // INSTANT READ RESET
     useEffect(() => {
         if (selectedUser) {
             setRawUsers(prev => prev.map(u =>
@@ -67,7 +69,6 @@ export const useChatList = (enableUpdates = true) => {
         }
     }, [selectedUser?.id]);
 
-    // Periodic Refresh (Last Seen updates)
     useEffect(() => {
         if (!enableUpdates) return;
         const intervalId = setInterval(forceUpdate, 60000);
@@ -81,7 +82,6 @@ export const useChatList = (enableUpdates = true) => {
         };
     }, [forceUpdate, enableUpdates]);
 
-    // Socket Listeners
     useEffect(() => {
         if (!socket || !enableUpdates) return;
 
@@ -98,7 +98,6 @@ export const useChatList = (enableUpdates = true) => {
                 return user;
             }));
 
-            // Also update the active user store if needed
             if (selectedUser?.id === data.userId) {
                 const isBlocked = selectedUser.hasBlocked || selectedUser.isBlockedBy;
                 setActiveUser({
@@ -127,32 +126,27 @@ export const useChatList = (enableUpdates = true) => {
         };
 
         const handleNewMessageNotification = async (data: { senderId: string, message: string, isOwn?: boolean }) => {
-            // Check if we already have this user
-            let userFound = false;
+            // Check the REF (synchronous, instant access to current state)
+            const userExists = usersRef.current.some(u => u.id === data.senderId);
 
-            setRawUsers(prev => {
-                const userExists = prev.some(u => u.id === data.senderId);
-                if (userExists) {
-                    userFound = true;
-                    return prev.map(u => {
-                        if (u.id === data.senderId) {
-                            const isCurrentChat = selectedUser?.id === data.senderId;
-                            const shouldIncrement = !data.isOwn && !isCurrentChat;
-                            return {
-                                ...u,
-                                lastMessage: data.message,
-                                lastActivity: new Date().toISOString(),
-                                unreadCount: shouldIncrement ? (u.unreadCount || 0) + 1 : (isCurrentChat ? 0 : (u.unreadCount || 0))
-                            };
-                        }
-                        return u;
-                    });
-                }
-                return prev;
-            });
+            if (userExists) {
+                // OPTIMISTIC UPDATE: Update the list immediately without fetching
+                setRawUsers(prev => prev.map(u => {
+                    if (u.id === data.senderId) {
+                        const isCurrentChat = selectedUser?.id === data.senderId;
+                        const shouldIncrement = !data.isOwn && !isCurrentChat;
 
-            // If user wasn't in list, fetch fresh list safely outside the setter
-            if (!userFound) {
+                        return {
+                            ...u,
+                            lastMessage: data.message,
+                            lastActivity: new Date().toISOString(),
+                            unreadCount: shouldIncrement ? (u.unreadCount || 0) + 1 : (isCurrentChat ? 0 : (u.unreadCount || 0))
+                        };
+                    }
+                    return u;
+                }));
+            } else {
+                // Only fetch if it's genuinely a NEW user not in our list
                 await fetchUsers();
             }
 
