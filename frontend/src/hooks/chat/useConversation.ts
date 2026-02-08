@@ -14,15 +14,17 @@ export const useConversation = (activeUser: User | null) => {
     const [replyTo, setReplyTo] = useState<Message | null>(null);
     const [isRemoteTyping, setIsRemoteTyping] = useState(false);
 
-    const scrollRef = useRef<HTMLDivElement>(null);
+    // REFS
+    const scrollRef = useRef<HTMLDivElement>(null);      // The dummy div at bottom
+    const containerRef = useRef<HTMLDivElement>(null);   // The actual scrollable container
+    const isInitialLoad = useRef(true);                 // Tracks if we just opened the chat
+
     const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const lastTypingEmitRef = useRef<number>(0);
 
-    // REFS: These keep track of state inside socket listeners without triggering re-renders
     const activeUserRef = useRef(activeUser);
     const conversationIdRef = useRef(conversationId);
 
-    // Sync Refs
     useEffect(() => { activeUserRef.current = activeUser; }, [activeUser]);
     useEffect(() => { conversationIdRef.current = conversationId; }, [conversationId]);
 
@@ -32,12 +34,53 @@ export const useConversation = (activeUser: User | null) => {
 
     const isBlocked = activeUser?.hasBlocked || activeUser?.isBlockedBy;
 
-    // Auto-scroll
-    useEffect(() => {
-        if (!isLoadingHistory) {
-            scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // ----------------------------------------------------
+    // PROFESSIONAL SCROLL LOGIC
+    // ----------------------------------------------------
+    const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
+        if (scrollRef.current) {
+            scrollRef.current.scrollIntoView({ behavior });
         }
-    }, [chatHistory, isRemoteTyping, replyTo, isLoadingHistory]);
+    }, []);
+
+    const handleAutoScroll = useCallback((newMsgAuthorId?: string) => {
+        const container = containerRef.current;
+        if (!container) return;
+
+        // 1. Initial Load: Snap instantly
+        if (isInitialLoad.current) {
+            scrollToBottom('auto');
+            isInitialLoad.current = false;
+            return;
+        }
+
+        // 2. If I sent the message: Always scroll (smooth)
+        if (newMsgAuthorId === currentUser?.id) {
+            scrollToBottom('smooth');
+            return;
+        }
+
+        // 3. If someone else sent it: Only scroll if I'm already at the bottom
+        // threshold of 100px allows for slight scrolling inaccuracy
+        const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+        if (isNearBottom) {
+            scrollToBottom('smooth');
+        }
+    }, [currentUser?.id, scrollToBottom]);
+
+    // Handle history loading & user switching
+    useEffect(() => {
+        if (activeUser?.id) {
+            isInitialLoad.current = true; // Reset initial load flag when switching users
+        }
+    }, [activeUser?.id]);
+
+    useEffect(() => {
+        if (!isLoadingHistory && chatHistory.length > 0) {
+            handleAutoScroll(chatHistory[chatHistory.length - 1]?.authorId);
+        }
+    }, [chatHistory, isLoadingHistory, handleAutoScroll]);
+
 
     // ----------------------------------------------------
     // SOCKET LISTENERS
@@ -45,7 +88,6 @@ export const useConversation = (activeUser: User | null) => {
     useEffect(() => {
         if (!socket || !activeUser?.id) return;
 
-        // ONLY Trigger loading if we are actually switching to a NEW user
         setIsLoadingHistory(true);
         setChatHistory([]);
 
@@ -53,7 +95,6 @@ export const useConversation = (activeUser: User | null) => {
 
         const handleConversationJoined = (data: { conversationId: string }) => {
             setConversationId(data.conversationId);
-            // Use ref to avoid stale closure issues if needed, but here we just emit
             socket.emit("mark_as_read", {
                 conversationId: data.conversationId,
                 recipientId: activeUserRef.current?.id
@@ -63,6 +104,7 @@ export const useConversation = (activeUser: User | null) => {
         const handleLoadHistory = (history: Message[]) => {
             setChatHistory(history);
             setIsLoadingHistory(false);
+            // Snap to bottom is handled by the useEffect watching chatHistory + isInitialLoad
         };
 
         const handleReceiveMessage = (newMessage: Message) => {
@@ -86,27 +128,18 @@ export const useConversation = (activeUser: User | null) => {
             setChatHistory(prev => prev.map(msg => msg.id === deletedMsg.id ? deletedMsg : msg));
         };
         const handleUserTyping = (data: { userId: string }) => {
-            if (data.userId === activeUserRef.current?.id) setIsRemoteTyping(true);
+            if (data.userId === activeUserRef.current?.id) {
+                setIsRemoteTyping(true);
+                // Optional: scroll down if remote user starts typing and we are at bottom
+                handleAutoScroll();
+            }
         };
         const handleUserStopTyping = (data: { userId: string }) => {
             if (data.userId === activeUserRef.current?.id) setIsRemoteTyping(false);
         };
-        const handleUserStatusChange = (data: { userId: string, isOnline: boolean }) => {
-            // Logic for status change updates is handled globally in useChatList,
-            // but we update typing status here locally
-            if (data.userId === activeUserRef.current?.id && !data.isOnline) setIsRemoteTyping(false);
-        };
         const handleMessagesRead = (data: { conversationId: string, readerId: string }) => {
             if (data.conversationId === conversationIdRef.current && data.readerId === activeUserRef.current?.id) {
                 setChatHistory(prev => prev.map(msg => ({ ...msg, isRead: true })));
-            }
-        };
-        const handleRelationshipUpdate = (data: { targetUserId: string, type: string }) => {
-            if (data.targetUserId === activeUserRef.current?.id || data.targetUserId === currentUser?.id) {
-                api.get('/users').then((res) => {
-                    const updatedUser = res.data.data.users.find((u: User) => u.id === activeUserRef.current?.id);
-                    if (updatedUser) setActiveUser(updatedUser);
-                });
             }
         };
 
@@ -116,9 +149,7 @@ export const useConversation = (activeUser: User | null) => {
         socket.on("message_deleted", handleMessageDeleted);
         socket.on("user_typing", handleUserTyping);
         socket.on("user_stop_typing", handleUserStopTyping);
-        socket.on("user_status_change", handleUserStatusChange);
         socket.on("messages_read", handleMessagesRead);
-        socket.on("user_relationship_update", handleRelationshipUpdate);
 
         return () => {
             socket.off("conversation_joined", handleConversationJoined);
@@ -127,13 +158,9 @@ export const useConversation = (activeUser: User | null) => {
             socket.off("message_deleted", handleMessageDeleted);
             socket.off("user_typing", handleUserTyping);
             socket.off("user_stop_typing", handleUserStopTyping);
-            socket.off("user_status_change", handleUserStatusChange);
             socket.off("messages_read", handleMessagesRead);
-            socket.off("user_relationship_update", handleRelationshipUpdate);
         };
-        // KEY FIX: Only re-run if socket changes or the USER ID changes.
-        // Do NOT re-run if 'activeUser' object changes (e.g. status update) or 'conversationId' updates.
-    }, [socket, activeUser?.id, currentUser, setActiveUser]);
+    }, [socket, activeUser?.id, handleAutoScroll]);
 
     // --- ACTIONS ---
     const sendMessage = (e?: React.FormEvent) => {
@@ -221,7 +248,6 @@ export const useConversation = (activeUser: User | null) => {
 
     const handleTyping = useCallback((text: string) => {
         setMessage(text);
-
         if (!socket || !conversationId || !activeUser || currentUser?.isPrivate || isBlocked) return;
 
         const now = Date.now();
@@ -241,7 +267,6 @@ export const useConversation = (activeUser: User | null) => {
         setMessage: handleTyping,
         chatHistory,
         isLoadingHistory,
-        conversationId,
         sendMessage,
         sendMediaMessage,
         deleteMessage,
@@ -249,6 +274,7 @@ export const useConversation = (activeUser: User | null) => {
         setReplyTo,
         isRemoteTyping,
         scrollRef,
+        containerRef,
         isBlocked
     };
 };
