@@ -158,7 +158,7 @@ export class ChatService {
         const messages = await prisma.message.findMany({
             where: { conversationId },
             take: limit,
-            orderBy: { createdAt: 'asc' }, // Index optimized sort
+            orderBy: { createdAt: 'desc' },
             select: {
                 id: true,
                 content: true,
@@ -180,7 +180,10 @@ export class ChatService {
             }
         });
 
-        return messages.map(msg => this.formatMessage(msg));
+        // Reversing the array.
+        // We fetched [Newest -> Oldest] for the DB query,
+        // but the UI expects [Oldest -> Newest] to render top-to-bottom.
+        return messages.reverse().map(msg => this.formatMessage(msg));
     }
 
     async markMessagesAsRead(conversationId: string, currentUserId: string) {
