@@ -1,6 +1,6 @@
 # 🚀 Enterprise Chat Platform
 
-![Project Banner](https://via.placeholder.com/1200x400?text=Enterprise+Chat+Application)
+![Project Banner](https://github.com/user-attachments/assets/4ec1f004-bac4-4f50-a9d1-62c7017257fd)
 > A production-grade, full-stack real-time communication platform built with scalability, security, and modern UI/UX principles in mind.
 
 ![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)
