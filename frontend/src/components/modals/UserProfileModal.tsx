@@ -19,7 +19,7 @@ interface UserProfileModalProps {
 export default function UserProfileModal({ isOpen, onClose, user }: UserProfileModalProps) {
     const [isLoading, setIsLoading] = useState(false);
     const [showBlockConfirm, setShowBlockConfirm] = useState(false); // Local state for confirmation
-    const { fetchUsers } = useChatList(false);
+    const { fetchUsers } = useChatList({ enableUpdates: false });
 
     if (!isOpen || !user) return null;
 
