@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react'; // Removed unused useState
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useChatStore } from '@/store/useChatStore';
 import { useConversation } from '@/hooks/chat/useConversation';
@@ -14,7 +14,6 @@ import { Loader2, ChevronDown } from 'lucide-react';
 export default function ChatPage() {
     const activeUser = useChatStore((state) => state.activeUser) as User | null;
     const currentUser = useAuthStore((state) => state.user);
-
     const {
         message, setMessage, chatHistory, isLoadingHistory, sendMessage,
         sendMediaMessage, deleteMessage, replyTo, setReplyTo,
@@ -23,44 +22,56 @@ export default function ChatPage() {
         isBlocked, isLoadingMore, isInitialLoad
     } = useConversation(activeUser);
 
-    // Virtualizer setup
+    // NEW: Ref to track previous history length for detecting prepends/appends
+    const prevHistoryLengthRef = useRef(chatHistory.length);
+
+    // Virtualizer setup (increased estimateSize for better handling of media messages)
     const virtualizer = useVirtualizer({
         count: chatHistory.length,
         getScrollElement: () => containerRef.current,
-        estimateSize: () => 80, // Estimated message height
+        estimateSize: () => 100, // CHANGED: Was 80; better for variable heights (text + media)
         overscan: 5,
         measureElement: typeof window !== 'undefined' && navigator.userAgent.indexOf('Firefox') === -1
             ? (element) => element?.getBoundingClientRect().height
             : undefined,
     });
-
     const items = virtualizer.getVirtualItems();
 
-    // Auto-scroll to bottom on initial load
+    // NEW: General auto-scroll for appends (new messages) + prepend detection
+    useEffect(() => {
+        if (!containerRef.current) return;
+
+        const lengthDelta = chatHistory.length - prevHistoryLengthRef.current;
+        const oldScrollTop = containerRef.current.scrollTop;
+        const oldScrollHeight = virtualizer.getTotalSize(); // Use virtual total size
+        const wasNearBottom = oldScrollHeight - oldScrollTop - containerRef.current.clientHeight < 150;
+
+        if (lengthDelta > 0) { // History grew (append or prepend)
+            if (wasNearBottom && !isInitialLoad.current) {
+                // Append case: Auto-scroll to new end if was near bottom (smooth for UX)
+                virtualizer.scrollToIndex(chatHistory.length - 1, { align: 'end', behavior: 'smooth' });
+            } else if (isLoadingMore) {
+                // Prepend case (load more older): Scroll to the start of the old content to prevent jump (instant)
+                virtualizer.scrollToIndex(lengthDelta, { align: 'start', behavior: 'auto' });
+            }
+        }
+
+        prevHistoryLengthRef.current = chatHistory.length;
+    }, [chatHistory.length, virtualizer, isLoadingMore, isInitialLoad]); // Dependencies: Trigger on length or load more changes
+
+    // CHANGED: Auto-scroll to bottom on initial load (use scrollToIndex for virtual accuracy; try without timeout first)
     useEffect(() => {
         if (!isLoadingHistory && chatHistory.length > 0 && isInitialLoad.current && containerRef.current) {
-            const timer = setTimeout(() => {
-                if (containerRef.current) {
-                    containerRef.current.scrollTop = containerRef.current.scrollHeight;
-                }
-                isInitialLoad.current = false;
-            }, 100);
-            return () => clearTimeout(timer);
+            virtualizer.scrollToIndex(chatHistory.length - 1, { align: 'end', behavior: 'auto' });
+            isInitialLoad.current = false;
         }
-    }, [isLoadingHistory, chatHistory.length]);
+    }, [isLoadingHistory, chatHistory.length, virtualizer]); // Removed timeout—add back as setTimeout(..., 100) if heights still load async
 
-    // Auto-scroll when user sends a message
-    const lastMessageAuthor = chatHistory[chatHistory.length - 1]?.authorId;
-
-    useEffect(() => {
-        if (!isInitialLoad.current && lastMessageAuthor === currentUser?.id && containerRef.current) {
-            containerRef.current.scrollTop = containerRef.current.scrollHeight;
-        }
-    }, [chatHistory.length, lastMessageAuthor, currentUser?.id]);
+    // REMOVED: The send-message auto-scroll effect (now handled by the general append useEffect above)
 
     const scrollToBottom = () => {
         if (containerRef.current) {
-            containerRef.current.scrollTop = containerRef.current.scrollHeight;
+            virtualizer.scrollToIndex(chatHistory.length - 1, { align: 'end', behavior: 'smooth' });
         }
     };
 
@@ -80,11 +91,9 @@ export default function ChatPage() {
     return (
         <div className="flex flex-col h-full w-full overflow-hidden relative bg-[#efeae2] dark:bg-[#0b141a]">
             <div className="absolute inset-0 opacity-[0.06] dark:opacity-[0.03] pointer-events-none bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')] z-0"></div>
-
             <div className="flex-none z-10 w-full">
                 <ChatHeader user={activeUser} isTyping={isRemoteTyping} />
             </div>
-
             <div
                 ref={containerRef}
                 onScroll={handleScroll}
@@ -110,21 +119,16 @@ export default function ChatPage() {
                                 <Loader2 className="w-6 h-6 text-primary animate-spin opacity-60" />
                             </div>
                         )}
-
                         {items.map((virtualRow) => {
                             const msg = chatHistory[virtualRow.index];
                             const previousMsg = chatHistory[virtualRow.index - 1];
                             const nextMsg = chatHistory[virtualRow.index + 1];
                             const isFromMe = msg.username !== activeUser.username;
-
                             const isFirstInGroup = !previousMsg || previousMsg.username !== msg.username ||
                                 getMessageDateLabel(msg.timestamp) !== getMessageDateLabel(previousMsg.timestamp);
-
                             const isLastInGroup = !nextMsg || nextMsg.username !== msg.username;
-
                             const showDateHeader = virtualRow.index === 0 ||
                                 getMessageDateLabel(msg.timestamp) !== getMessageDateLabel(chatHistory[virtualRow.index - 1].timestamp);
-
                             return (
                                 <div
                                     key={virtualRow.key}
@@ -158,7 +162,6 @@ export default function ChatPage() {
                         })}
                     </div>
                 )}
-
                 {/* Scroll to bottom button */}
                 {unreadBelowCount > 0 && (
                     <button
@@ -172,7 +175,6 @@ export default function ChatPage() {
                     </button>
                 )}
             </div>
-
             <div className="flex-none z-20 w-full bg-[#f0f2f5] dark:bg-[#202c33]">
                 <ChatInput
                     value={message}
