@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
+    "@tanstack/react-virtual": "^3.13.18",
     "@types/uuid": "^10.0.0",
     "axios": "^1.13.4",
     "clsx": "^2.1.1",

@@ -1,7 +1,6 @@
-import {useState, useEffect, useRef, useCallback, useLayoutEffect} from 'react';
+import {useState, useEffect, useRef, useCallback} from 'react';
 import { useSocket } from '@/hooks/useSocket';
 import { useAuthStore } from '@/store/useAuthStore';
-import { useChatStore } from '@/store/useChatStore';
 import { User, Message } from '@/types';
 import { api } from '@/lib/api';
 import { v4 as uuidv4 } from 'uuid';
@@ -10,106 +9,33 @@ export const useConversation = (activeUser: User | null) => {
     const [message, setMessage] = useState('');
     const [chatHistory, setChatHistory] = useState<(Message & { isLocal?: boolean })[]>([]);
     const [isLoadingHistory, setIsLoadingHistory] = useState(false);
-
-    // PAGINATION STATES
     const [hasMore, setHasMore] = useState(false);
     const [isLoadingMore, setIsLoadingMore] = useState(false);
-
     const [conversationId, setConversationId] = useState<string | null>(null);
     const [replyTo, setReplyTo] = useState<Message | null>(null);
     const [isRemoteTyping, setIsRemoteTyping] = useState(false);
     const [unreadBelowCount, setUnreadBelowCount] = useState(0);
 
-    const scrollRef = useRef<HTMLDivElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const isInitialLoad = useRef(true);
-
-    // GUARD: Prevents a single message from being counted twice
     const countedMessageIds = useRef<Set<string>>(new Set());
-
-    // FLAGS: To control scroll behavior during specific updates
-    const isDeletingRef = useRef(false);
-    const isPaginatingRef = useRef(false);
-
-    // CRITICAL FIX: Store scroll anchor data for pagination
-    const paginationAnchorRef = useRef<{
-        shouldAnchor: boolean;
-        previousScrollHeight: number;
-        previousScrollTop: number;
-    } | null>(null);
 
     const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const lastTypingEmitRef = useRef<number>(0);
-
     const activeUserRef = useRef(activeUser);
     const conversationIdRef = useRef(conversationId);
-
-    // For delete scroll fix
-    const deleteAdjustment = useRef<{ oldHeight: number; oldScrollTop: number } | null>(null);
 
     useEffect(() => { activeUserRef.current = activeUser; }, [activeUser]);
     useEffect(() => { conversationIdRef.current = conversationId; }, [conversationId]);
 
     const socket = useSocket();
     const currentUser = useAuthStore((state) => state.user);
-    const setActiveUser = useChatStore((state) => state.setActiveUser);
-
     const isBlocked = activeUser?.hasBlocked || activeUser?.isBlockedBy;
-
-    // ----------------------------------------------------
-    // SCROLL ACTIONS
-    // ----------------------------------------------------
-    const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
-        if (scrollRef.current) {
-            scrollRef.current.scrollIntoView({ behavior });
-            setUnreadBelowCount(0);
-            countedMessageIds.current.clear();
-        }
-    }, []);
-
-    const handleAutoScroll = useCallback((newMsgAuthorId?: string) => {
-        const container = containerRef.current;
-        if (!container) return;
-
-        // CRITICAL: Block auto-scroll during pagination
-        if (isPaginatingRef.current || paginationAnchorRef.current?.shouldAnchor) {
-            return;
-        }
-
-        // Don't handle initial load here - let the dedicated useLayoutEffect handle it
-        if (isInitialLoad.current) {
-            return;
-        }
-
-        // If WE sent the message: Always scroll to bottom
-        if (newMsgAuthorId === currentUser?.id) {
-            scrollToBottom('smooth');
-            return;
-        }
-
-        // Incoming message: Only scroll if user is already near the bottom
-        const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150;
-        if (isNearBottom) {
-            scrollToBottom('smooth');
-        }
-    }, [currentUser?.id, scrollToBottom]);
 
     const loadMoreMessages = useCallback(() => {
         if (!socket || !conversationId || !hasMore || isLoadingMore || chatHistory.length === 0) return;
 
-        const container = containerRef.current;
-        if (!container) return;
-
-        // CRITICAL FIX: Capture BOTH scroll position AND height BEFORE state update
-        paginationAnchorRef.current = {
-            shouldAnchor: true,
-            previousScrollHeight: container.scrollHeight,
-            previousScrollTop: container.scrollTop
-        };
-
         setIsLoadingMore(true);
-        isPaginatingRef.current = true;
-
         const oldestMessageId = chatHistory[0].id;
         socket.emit("load_more_messages", { conversationId, cursor: oldestMessageId });
     }, [socket, conversationId, hasMore, isLoadingMore, chatHistory]);
@@ -118,11 +44,12 @@ export const useConversation = (activeUser: User | null) => {
         const container = containerRef.current;
         if (!container) return;
 
-        // PAGINATION TRIGGER
+        // Pagination trigger
         if (container.scrollTop < 50 && hasMore && !isLoadingMore) {
             loadMoreMessages();
         }
 
+        // Unread counter
         const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
         if (isNearBottom) {
             setUnreadBelowCount(0);
@@ -136,82 +63,10 @@ export const useConversation = (activeUser: User | null) => {
             setUnreadBelowCount(0);
             countedMessageIds.current.clear();
             setHasMore(false);
-            isPaginatingRef.current = false;
-            paginationAnchorRef.current = null;
         }
     }, [activeUser?.id]);
 
-    // ✅ NEW: DEDICATED INITIAL SCROLL EFFECT
-    // This runs BEFORE paint when initial history loads
-    useLayoutEffect(() => {
-        // Only run on initial history load (not pagination)
-        if (isInitialLoad.current && !isLoadingHistory && chatHistory.length > 0 && !isLoadingMore) {
-            scrollToBottom('auto');
-            isInitialLoad.current = false;
-        }
-    }, [isLoadingHistory, chatHistory.length, isLoadingMore, scrollToBottom]);
-
-    // MAIN AUTO-SCROLL EFFECT (for new messages after initial load)
-    useEffect(() => {
-        // CRITICAL: Block auto-scroll during pagination or deletion
-        if (
-            isDeletingRef.current ||
-            isPaginatingRef.current ||
-            paginationAnchorRef.current?.shouldAnchor ||
-            isLoadingMore ||
-            isInitialLoad.current // Don't auto-scroll during initial load
-        ) {
-            return;
-        }
-
-        if (!isLoadingHistory && chatHistory.length > 0) {
-            handleAutoScroll(chatHistory[chatHistory.length - 1]?.authorId);
-        }
-
-        // CLEANUP: Reset pagination flag AFTER auto-scroll check has completed
-        if (!isLoadingMore && isPaginatingRef.current) {
-            isPaginatingRef.current = false;
-        }
-    }, [chatHistory, isLoadingHistory, isLoadingMore, handleAutoScroll]);
-
-    // SCROLL ANCHORING & ADJUSTMENTS
-    useLayoutEffect(() => {
-        const container = containerRef.current;
-        if (!container) return;
-
-        // CRITICAL FIX: Handle pagination scroll anchoring FIRST
-        if (paginationAnchorRef.current?.shouldAnchor) {
-            const { previousScrollHeight, previousScrollTop } = paginationAnchorRef.current;
-            const newScrollHeight = container.scrollHeight;
-            const heightDifference = newScrollHeight - previousScrollHeight;
-
-            // THE CORRECT FORMULA:
-            // New scroll position = old scroll position + height added by new content
-            // This keeps the user looking at the same message they were viewing
-            container.scrollTop = previousScrollTop + heightDifference;
-
-            // Clean up pagination anchor ONLY
-            // DON'T reset isPaginatingRef here - let useEffect handle it
-            paginationAnchorRef.current = null;
-            return;
-        }
-
-        // Handle deletion scroll fix
-        if (deleteAdjustment.current) {
-            const { oldHeight, oldScrollTop } = deleteAdjustment.current;
-            const newHeight = container.scrollHeight;
-            if (newHeight !== oldHeight && oldScrollTop > 0) {
-                container.scrollTop = oldScrollTop + (newHeight - oldHeight);
-            }
-            deleteAdjustment.current = null;
-            isDeletingRef.current = false;
-            return;
-        }
-    }, [chatHistory, isLoadingMore]);
-
-    // ----------------------------------------------------
-    // SOCKET LISTENERS
-    // ----------------------------------------------------
+    // Socket listeners
     useEffect(() => {
         if (!socket || !activeUser?.id) return;
 
@@ -235,15 +90,9 @@ export const useConversation = (activeUser: User | null) => {
         };
 
         const handleMoreMessagesLoaded = (data: { messages: Message[], hasMore: boolean }) => {
-            // CRITICAL FIX: Simply prepend messages
-            // The layoutEffect will handle scroll anchoring using paginationAnchorRef
             setChatHistory(prev => [...data.messages, ...prev]);
             setHasMore(data.hasMore);
             setIsLoadingMore(false);
-
-            // Note: paginationAnchorRef.current.shouldAnchor is still true
-            // This prevents auto-scroll in the effect above
-            // layoutEffect will handle the scroll positioning
         };
 
         const handleReceiveMessage = (newMessage: Message) => {
@@ -275,14 +124,6 @@ export const useConversation = (activeUser: User | null) => {
         };
 
         const handleMessageDeleted = (deletedMsg: Message) => {
-            const container = containerRef.current;
-            isDeletingRef.current = true;
-            if (container) {
-                deleteAdjustment.current = {
-                    oldHeight: container.scrollHeight,
-                    oldScrollTop: container.scrollTop
-                };
-            }
             setChatHistory(prev => prev.map(msg => msg.id === deletedMsg.id ? deletedMsg : msg));
         };
 
@@ -319,7 +160,6 @@ export const useConversation = (activeUser: User | null) => {
         };
     }, [socket, activeUser?.id, currentUser?.id]);
 
-    // --- ACTIONS ---
     const sendMessage = (e?: React.FormEvent) => {
         if (e) e.preventDefault();
         if (isBlocked) return;
@@ -344,7 +184,6 @@ export const useConversation = (activeUser: User | null) => {
         };
 
         setChatHistory(prev => [...prev, optimisticMessage]);
-        handleAutoScroll(currentUser?.id);
 
         socket.emit("send_message", { conversationId, recipientId: activeUser.id, message, replyToId: replyTo?.id });
 
@@ -399,10 +238,21 @@ export const useConversation = (activeUser: User | null) => {
     }, [socket, conversationId, activeUser, currentUser, isBlocked]);
 
     return {
-        message, setMessage: handleTyping, chatHistory, isLoadingHistory,
-        sendMessage, sendMediaMessage, deleteMessage, replyTo, setReplyTo,
-        isRemoteTyping, scrollRef, containerRef, unreadBelowCount,
-        scrollToBottom, handleScroll, isBlocked,
-        isLoadingMore
+        message,
+        setMessage: handleTyping,
+        chatHistory,
+        isLoadingHistory,
+        sendMessage,
+        sendMediaMessage,
+        deleteMessage,
+        replyTo,
+        setReplyTo,
+        isRemoteTyping,
+        containerRef,
+        unreadBelowCount,
+        handleScroll,
+        isBlocked,
+        isLoadingMore,
+        isInitialLoad
     };
 };
