@@ -1,7 +1,7 @@
 'use client';
 import React from 'react';
 import { useChatStore } from '@/store/useChatStore';
-import { useConversation } from '@/hooks/chat/useConversation';
+import { useConversation } from '@/hooks/chat/window/useConversation';
 import { useAuthStore } from '@/store/useAuthStore';
 import { User } from '@/types';
 import { ChatHeader } from '@/components/chat/window/ChatHeader';
@@ -77,7 +77,6 @@ export default function ChatPage() {
             <div
                 ref={containerRef}
                 onScroll={handleScroll}
-                // UPDATED: Added !overflow-anchor-none to disable browser auto-scroll behavior
                 className="flex-1 overflow-y-auto relative z-0 custom-scrollbar overscroll-contain !overflow-anchor-none"
                 style={{ scrollBehavior: 'auto' }}
             >

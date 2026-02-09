@@ -1,6 +1,6 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
-import { Loader2 } from "lucide-react" // npm install lucide-react
+import { Loader2 } from "lucide-react"
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
     variant?: 'primary' | 'outline' | 'ghost' | 'destructive' | 'secondary';

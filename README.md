@@ -1,7 +1,11 @@
 # 🚀 Enterprise Chat Platform
+# 🚀 Enterprise Chat Platform
 
 ![Project Banner](https://github.com/user-attachments/assets/d8984424-a207-47a0-b6a8-48ae9a6afcc1)
 > A production-grade, full-stack real-time communication platform built with scalability, security, and modern UI/UX principles in mind.
+
+### [🌐 View Live Demo](https://fred-chat-app.vercel.app/)
+> **Note:** The backend is hosted on a free-tier instance (Render), so the initial request might take **30-60 seconds** to wake up the server.
 
 ![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)
 ![Next JS](https://img.shields.io/badge/Next-black?style=for-the-badge&logo=next.js&logoColor=white)
@@ -9,6 +13,9 @@
 ![Socket.io](https://img.shields.io/badge/Socket.io-black?style=for-the-badge&logo=socket.io&badgeColor=010101)
 ![Prisma](https://img.shields.io/badge/Prisma-3982CE?style=for-the-badge&logo=Prisma&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-316192?style=for-the-badge&logo=postgresql&logoColor=white)
+![Neon](https://img.shields.io/badge/Neon-00E599?style=for-the-badge&logo=neon&logoColor=black)
+![Render](https://img.shields.io/badge/Render-46E3B7?style=for-the-badge&logo=render&logoColor=white)
+[![Live Demo](https://img.shields.io/badge/Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white)](https://fred-chat-app.vercel.app/)
 
 ## 📖 Overview
 

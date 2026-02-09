@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useChatStore } from '@/store/useChatStore';
 import { useSocket } from '@/hooks/useSocket';
-import { useChatList } from '@/hooks/chat/useChatList';
+import { useChatList } from '@/hooks/chat/sidebar/useChatList';
 import { User } from '@/types';
 import ChatSidebar from '@/components/chat/ChatSidebar';
 import EditProfileModal from '@/components/modals/EditProfileModal';

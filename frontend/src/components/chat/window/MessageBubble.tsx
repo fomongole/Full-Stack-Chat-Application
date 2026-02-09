@@ -73,7 +73,7 @@ export const MessageBubble = memo(function MessageBubble({ message, isFromMe, is
         }
 
         // Calculate swipe direction and amount
-        let delta = touchEndRef.current - touchStartRef.current;
+        const delta = touchEndRef.current - touchStartRef.current;
         if (isFromMe) {
             // For own messages (right-aligned): Swipe left (negative delta)
             if (delta < 0 && !message.isDeleted) {
@@ -91,7 +91,7 @@ export const MessageBubble = memo(function MessageBubble({ message, isFromMe, is
         if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
 
         // Detect Swipe to Reply (>50px in correct direction)
-        let delta = touchEndRef.current - touchStartRef.current;
+        const delta = touchEndRef.current - touchStartRef.current;
         const swipeThreshold = 50;
         if (isFromMe) {
             if (delta < -swipeThreshold && touchEndRef.current !== 0 && !message.isDeleted) {
@@ -124,42 +124,6 @@ export const MessageBubble = memo(function MessageBubble({ message, isFromMe, is
         ${isLastInGroup ? 'rounded-bl-xl' : 'rounded-bl-xl'} 
         rounded-r-xl shadow-sm`;
 
-    // 🛠️ Action Buttons Component
-    const ActionButtons = () => (
-        <div className={`
-            flex items-center gap-1.5 px-2 transition-opacity duration-200 
-            ${isFromMe ? 'justify-end' : 'justify-start'}
-            ${showActionsMobile ? 'opacity-100' : 'opacity-0 md:group-hover/row:opacity-100'} 
-        `}>
-            {/* Reply */}
-            {!message.isDeleted && (
-                <button
-                    onClick={(e) => { e.stopPropagation(); onReply(message); }}
-                    className="p-2 md:p-1.5 text-zinc-400 hover:text-primary hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors bg-white/50 md:bg-transparent shadow-sm md:shadow-none"
-                    title="Reply"
-                >
-                    <Reply className="w-5 h-5 md:w-4 md:h-4" />
-                </button>
-            )}
-
-            {/* Delete */}
-            {canDelete && (
-                <button
-                    onClick={handleDeleteClick}
-                    className={`p-2 md:p-1.5 rounded-full transition-colors flex items-center gap-1 bg-white/50 md:bg-transparent shadow-sm md:shadow-none ${
-                        isConfirmingDelete
-                            ? "bg-red-50 text-red-600 dark:bg-red-900/20"
-                            : "text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10"
-                    }`}
-                    title="Delete"
-                >
-                    <Trash2 className="w-5 h-5 md:w-4 md:h-4" />
-                    {isConfirmingDelete && <span className="text-[10px] font-bold uppercase hidden md:inline">Confirm</span>}
-                </button>
-            )}
-        </div>
-    );
-
     return (
         <div
             className={`
@@ -177,12 +141,44 @@ export const MessageBubble = memo(function MessageBubble({ message, isFromMe, is
                 ${isFromMe ? 'flex-row' : 'flex-row-reverse'} 
             `}>
 
-                <ActionButtons />
+                {/* 🛠️ Action Buttons (Inlined) */}
+                <div className={`
+                    flex items-center gap-1.5 px-2 transition-opacity duration-200 
+                    ${isFromMe ? 'justify-end' : 'justify-start'}
+                    ${showActionsMobile ? 'opacity-100' : 'opacity-0 md:group-hover/row:opacity-100'} 
+                `}>
+                    {/* Reply */}
+                    {!message.isDeleted && (
+                        <button
+                            onClick={(e) => { e.stopPropagation(); onReply(message); }}
+                            className="p-2 md:p-1.5 text-zinc-400 hover:text-primary hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors bg-white/50 md:bg-transparent shadow-sm md:shadow-none"
+                            title="Reply"
+                        >
+                            <Reply className="w-5 h-5 md:w-4 md:h-4" />
+                        </button>
+                    )}
+
+                    {/* Delete */}
+                    {canDelete && (
+                        <button
+                            onClick={handleDeleteClick}
+                            className={`p-2 md:p-1.5 rounded-full transition-colors flex items-center gap-1 bg-white/50 md:bg-transparent shadow-sm md:shadow-none ${
+                                isConfirmingDelete
+                                    ? "bg-red-50 text-red-600 dark:bg-red-900/20"
+                                    : "text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10"
+                            }`}
+                            title="Delete"
+                        >
+                            <Trash2 className="w-5 h-5 md:w-4 md:h-4" />
+                            {isConfirmingDelete && <span className="text-[10px] font-bold uppercase hidden md:inline">Confirm</span>}
+                        </button>
+                    )}
+                </div>
 
                 {/* THE BUBBLE */}
                 <div
                     ref={bubbleRef}
-                    onClick={() => setShowActionsMobile(!showActionsMobile)} // Toggle actions on simple tap too
+                    onClick={() => setShowActionsMobile(!showActionsMobile)}
                     className={`
                         relative overflow-hidden flex-1
                         ${isFromMe ? myClasses : theirClasses}

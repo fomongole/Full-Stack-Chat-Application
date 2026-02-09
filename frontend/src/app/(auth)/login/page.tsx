@@ -48,7 +48,12 @@ export default function LoginPage() {
                     }
                 />
 
-                <Button type="submit" className="w-full h-11" isLoading={isSubmitting}>
+                <Button
+                    type="submit"
+                    className="w-full h-11"
+                    isLoading={isSubmitting}
+                    disabled={isSubmitting}
+                >
                     Sign In
                 </Button>
             </form>

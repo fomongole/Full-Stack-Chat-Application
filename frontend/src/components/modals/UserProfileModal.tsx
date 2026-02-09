@@ -3,12 +3,10 @@
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { formatLastSeen } from '@/lib/formatTime';
-import { api } from '@/lib/api';
-import { toast } from 'sonner';
-import { useChatList } from '@/hooks/chat/useChatList';
 import { User } from '@/types';
 import { X, Lock, ShieldBan, ShieldCheck } from 'lucide-react';
-import BlockModal from './BlockModal'; // Import your custom modal
+import BlockModal from './BlockModal';
+import { useUserBlock } from '@/hooks/user/useUserBlock';
 
 interface UserProfileModalProps {
     isOpen: boolean;
@@ -17,32 +15,19 @@ interface UserProfileModalProps {
 }
 
 export default function UserProfileModal({ isOpen, onClose, user }: UserProfileModalProps) {
-    const [isLoading, setIsLoading] = useState(false);
-    const [showBlockConfirm, setShowBlockConfirm] = useState(false); // Local state for confirmation
-    const { fetchUsers } = useChatList({ enableUpdates: false });
+    const [showBlockConfirm, setShowBlockConfirm] = useState(false);
+
+    const { toggleBlockStatus, isLoading } = useUserBlock();
 
     if (!isOpen || !user) return null;
 
-    const handleBlockAction = async () => {
-        setIsLoading(true);
-        try {
-            if (user.hasBlocked) {
-                await api.post('/users/unblock', { userIdToUnblock: user.id });
-                toast.success(`Unblocked ${user.username}`);
-            } else {
-                await api.post('/users/block', { userIdToBlock: user.id });
-                toast.error(`Blocked ${user.username}`);
-            }
+    const handleConfirmBlock = async () => {
+        // Delegate the logic to the hook
+        const success = await toggleBlockStatus(user);
 
-            await fetchUsers();
+        if (success) {
             setShowBlockConfirm(false);
-            // Optional: Close profile modal after blocking if desired, or keep open to see status change
             onClose();
-
-        } catch (error: any) {
-            toast.error(error.response?.data?.message || 'Action failed');
-        } finally {
-            setIsLoading(false);
         }
     };
 
@@ -71,7 +56,7 @@ export default function UserProfileModal({ isOpen, onClose, user }: UserProfileM
                             )}
                         </div>
 
-                        {/* Status Dot - FIXED POSITIONING */}
+                        {/* Status Dot */}
                         {user.isOnline && (
                             <div className="absolute bottom-1 right-1 p-1 bg-white dark:bg-zinc-950 rounded-full">
                                 <div className="w-5 h-5 bg-green-500 rounded-full animate-pulse border border-white dark:border-zinc-950"></div>
@@ -131,7 +116,7 @@ export default function UserProfileModal({ isOpen, onClose, user }: UserProfileM
             <BlockModal
                 isOpen={showBlockConfirm}
                 onClose={() => setShowBlockConfirm(false)}
-                onConfirm={handleBlockAction}
+                onConfirm={handleConfirmBlock}
                 username={user.username}
                 isBlocked={!!user.hasBlocked}
                 isLoading={isLoading}

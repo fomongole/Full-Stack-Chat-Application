@@ -67,7 +67,12 @@ export default function RegisterPage() {
                     <PasswordStrengthMeter password={passwordValue} />
                 </div>
 
-                <Button type="submit" className="w-full h-11" isLoading={isSubmitting}>
+                <Button
+                    type="submit"
+                    className="w-full h-11"
+                    isLoading={isSubmitting}
+                    disabled={isSubmitting}
+                >
                     Create Account
                 </Button>
             </form>

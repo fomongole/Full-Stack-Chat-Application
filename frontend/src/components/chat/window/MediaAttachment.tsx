@@ -1,7 +1,7 @@
 'use client';
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Play, Download, Maximize2, Volume2, VolumeX } from 'lucide-react';
+import { X, Play, Download, Maximize2 } from 'lucide-react';
 
 interface MediaAttachmentProps {
     url: string;
@@ -9,15 +9,26 @@ interface MediaAttachmentProps {
     isLocal?: boolean;
 }
 
-export function MediaAttachment({ url, type, isLocal }: MediaAttachmentProps) {
-    const [isLoading, setIsLoading] = useState(true);
-    const [isExpanded, setIsExpanded] = useState(false);
-    const [isPlaying, setIsPlaying] = useState(false);
-    const [isMuted, setIsMuted] = useState(false);
-    const [mounted, setMounted] = useState(false);
-    const videoRef = useRef<HTMLVideoElement>(null);
+// ----------------------------------------------------------------------
+// Helper Component: Full Screen Portal
+// Moved outside to prevent re-creation on every render
+// ----------------------------------------------------------------------
 
-    useEffect(() => { setMounted(true); }, []);
+interface FullScreenMediaProps {
+    url: string;
+    type: 'IMAGE' | 'VIDEO';
+    onClose: () => void;
+}
+
+function FullScreenMedia({ url, type, onClose }: FullScreenMediaProps) {
+
+    useEffect(() => {
+        // Lock body scroll when open
+        document.body.style.overflow = 'hidden';
+        return () => {
+            document.body.style.overflow = 'unset';
+        };
+    }, []);
 
     const handleDownload = async (e: React.MouseEvent) => {
         e.stopPropagation();
@@ -37,57 +48,52 @@ export function MediaAttachment({ url, type, isLocal }: MediaAttachmentProps) {
         }
     };
 
-    const togglePlay = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (videoRef.current) {
-            if (videoRef.current.paused) {
-                videoRef.current.play();
-                setIsPlaying(true);
-            } else {
-                videoRef.current.pause();
-                setIsPlaying(false);
-            }
-        }
-    };
+    // Safety check: ensure we are in a browser environment before accessing document.body
+    if (typeof document === 'undefined') return null;
 
-    // --- FULL SCREEN MEDIA PORTAL ---
-    const MediaOverlay = () => {
-        if (!mounted) return null;
-        return createPortal(
-            <div
-                className="fixed inset-0 z-[9999] bg-black/95 backdrop-blur-xl flex flex-col animate-in fade-in duration-300"
-                onClick={() => setIsExpanded(false)}
-            >
-                {/* Header Controls */}
-                <div className="flex justify-between items-center p-4 z-10 bg-gradient-to-b from-black/50 to-transparent">
-                    <span className="text-white text-sm font-medium">Attachment</span>
-                    <div className="flex items-center gap-3">
-                        <button onClick={handleDownload} className="p-2.5 bg-white/10 hover:bg-white/20 rounded-full text-white transition-all">
-                            <Download className="w-5 h-5" />
-                        </button>
-                        <button onClick={() => setIsExpanded(false)} className="p-2.5 bg-red-500/80 hover:bg-red-500 rounded-full text-white transition-all">
-                            <X className="w-5 h-5" />
-                        </button>
-                    </div>
+    return createPortal(
+        <div
+            className="fixed inset-0 z-[9999] bg-black/95 backdrop-blur-xl flex flex-col animate-in fade-in duration-300"
+            onClick={onClose}
+        >
+            {/* Header Controls */}
+            <div className="flex justify-between items-center p-4 z-10 bg-gradient-to-b from-black/50 to-transparent">
+                <span className="text-white text-sm font-medium">Attachment</span>
+                <div className="flex items-center gap-3">
+                    <button onClick={handleDownload} className="p-2.5 bg-white/10 hover:bg-white/20 rounded-full text-white transition-all">
+                        <Download className="w-5 h-5" />
+                    </button>
+                    <button onClick={onClose} className="p-2.5 bg-red-500/80 hover:bg-red-500 rounded-full text-white transition-all">
+                        <X className="w-5 h-5" />
+                    </button>
                 </div>
+            </div>
 
-                {/* Content */}
-                <div className="flex-1 flex items-center justify-center p-2" onClick={(e) => e.stopPropagation()}>
-                    {type === 'VIDEO' ? (
-                        <video
-                            src={url}
-                            controls
-                            autoPlay
-                            className="max-w-full max-h-[80vh] shadow-2xl rounded-lg"
-                        />
-                    ) : (
-                        <img src={url} alt="Full view" className="max-w-full max-h-[85vh] object-contain shadow-2xl animate-in zoom-in-95 duration-300" />
-                    )}
-                </div>
-            </div>,
-            document.body
-        );
-    };
+            {/* Content */}
+            <div className="flex-1 flex items-center justify-center p-2" onClick={(e) => e.stopPropagation()}>
+                {type === 'VIDEO' ? (
+                    <video
+                        src={url}
+                        controls
+                        autoPlay
+                        className="max-w-full max-h-[80vh] shadow-2xl rounded-lg"
+                    />
+                ) : (
+                    <img src={url} alt="Full view" className="max-w-full max-h-[85vh] object-contain shadow-2xl animate-in zoom-in-95 duration-300" />
+                )}
+            </div>
+        </div>,
+        document.body
+    );
+}
+
+// ----------------------------------------------------------------------
+// 📦 Main Component
+// ----------------------------------------------------------------------
+
+export function MediaAttachment({ url, type, isLocal }: MediaAttachmentProps) {
+    const [isLoading, setIsLoading] = useState(true);
+    const [isExpanded, setIsExpanded] = useState(false);
 
     if (type === 'VIDEO') {
         return (
@@ -107,7 +113,15 @@ export function MediaAttachment({ url, type, isLocal }: MediaAttachmentProps) {
                         </div>
                     </div>
                 </div>
-                {isExpanded && <MediaOverlay />}
+
+                {/* Render separate component only when expanded */}
+                {isExpanded && (
+                    <FullScreenMedia
+                        url={url}
+                        type={type}
+                        onClose={() => setIsExpanded(false)}
+                    />
+                )}
             </>
         );
     }
@@ -135,7 +149,15 @@ export function MediaAttachment({ url, type, isLocal }: MediaAttachmentProps) {
                     </div>
                 )}
             </div>
-            {isExpanded && <MediaOverlay />}
+
+            {/* Render separate component only when expanded */}
+            {isExpanded && (
+                <FullScreenMedia
+                    url={url}
+                    type={type}
+                    onClose={() => setIsExpanded(false)}
+                />
+            )}
         </>
     );
 }

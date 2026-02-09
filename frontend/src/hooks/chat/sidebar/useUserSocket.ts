@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect } from 'react';
 import { Socket } from 'socket.io-client';
 
 interface UseUserSocketProps {

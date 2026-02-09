@@ -1,13 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { toast } from 'sonner';
 import { User } from '@/types';
-import { api } from '@/lib/api';
 import { formatLastSeen } from '@/lib/formatTime';
-import { useChatList } from '@/hooks/chat/useChatList';
 import { useChatStore } from '@/store/useChatStore';
 import BlockModal from '@/components/modals/BlockModal';
 import UserProfileModal from '@/components/modals/UserProfileModal';
 import { ArrowLeft, MoreVertical, Ban, Lock, Phone, Video } from 'lucide-react';
+import { useUserBlock } from '@/hooks/user/useUserBlock';
 
 interface ChatHeaderProps {
     user: User;
@@ -18,12 +17,11 @@ export function ChatHeader({ user, isTyping }: ChatHeaderProps) {
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isBlockModalOpen, setIsBlockModalOpen] = useState(false);
     const [isProfileOpen, setIsProfileOpen] = useState(false);
-    const [isLoading, setIsLoading] = useState(false);
+
+    const { toggleBlockStatus, isLoading } = useUserBlock();
 
     const setActiveUser = useChatStore((state) => state.setActiveUser);
     const menuRef = useRef<HTMLDivElement>(null);
-
-    const { fetchUsers } = useChatList({ enableUpdates: false });
 
     const isBlocked = user.hasBlocked || user.isBlockedBy;
 
@@ -37,29 +35,21 @@ export function ChatHeader({ user, isTyping }: ChatHeaderProps) {
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
+    // ⚡ Refactored Handler
     const handleBlockAction = async () => {
-        setIsLoading(true);
-        try {
-            if (user.hasBlocked) {
-                await api.post('/users/unblock', { userIdToUnblock: user.id });
-                toast.success(`Unblocked ${user.username}`);
-            } else {
-                await api.post('/users/block', { userIdToBlock: user.id });
-                toast.error(`Blocked ${user.username}`);
-            }
-            await fetchUsers();
+        // Simply delegate to the hook
+        const success = await toggleBlockStatus(user);
+
+        // Only close menus if the API call succeeded
+        if (success) {
             setIsBlockModalOpen(false);
             setIsMenuOpen(false);
-        } catch (error: any) {
-            toast.error(error.response?.data?.message || 'Action failed');
-        } finally {
-            setIsLoading(false);
         }
     };
 
     const handleCallFeature = (type: 'Audio' | 'Video') => {
         toast.info(`${type} calling is coming soon!`, {
-            description: "Ngenda kusaba obe mukakamu!😀 Oba mbikuuwe?.",
+            description: "Ngenda kusaba obe mukakamu!😀",
             duration: 3000,
         });
     };

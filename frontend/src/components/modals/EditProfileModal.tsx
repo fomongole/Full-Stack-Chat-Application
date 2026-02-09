@@ -10,7 +10,6 @@ import { api } from '@/lib/api';
 import { toast } from "sonner";
 import { Camera, User as UserIcon, Palette, Lock, Sun, Moon, Monitor, X, Check } from 'lucide-react';
 
-// Enterprise Constant
 const MAX_PROFILE_IMAGE_SIZE_MB = 1;
 const MAX_PROFILE_IMAGE_BYTES = MAX_PROFILE_IMAGE_SIZE_MB * 1024 * 1024;
 
@@ -28,7 +27,7 @@ export default function EditProfileModal({ isOpen, onClose }: EditProfileModalPr
 
     const [username, setUsername] = useState(user?.username || '');
     const [about, setAbout] = useState(user?.about || '');
-    const [isPrivate, setIsPrivate] = useState((user as any)?.isPrivate || false);
+    const [isPrivate, setIsPrivate] = useState((user)?.isPrivate || false);
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
     const [previewUrl, setPreviewUrl] = useState<string | null>(user?.image || null);
     const [isLoading, setIsLoading] = useState(false);
@@ -37,7 +36,7 @@ export default function EditProfileModal({ isOpen, onClose }: EditProfileModalPr
         if (user) {
             setUsername(user.username || '');
             setAbout(user.about || '');
-            setIsPrivate((user as any).isPrivate || false);
+            setIsPrivate((user).isPrivate || false);
             setPreviewUrl(user.image || null);
         }
     }, [user]);
@@ -88,9 +87,11 @@ export default function EditProfileModal({ isOpen, onClose }: EditProfileModalPr
 
             toast.success("Profile updated successfully!");
             onClose();
-        } catch (error: any) {
+        }catch (error: unknown) {
             console.error(error);
-            toast.error(error.response?.data?.message || "Failed to update profile");
+            // Cast error to a shape that has response.data.message
+            const apiError = error as { response?: { data?: { message?: string } } };
+            toast.error(apiError.response?.data?.message || "Failed to update profile");
         } finally {
             setIsLoading(false);
         }

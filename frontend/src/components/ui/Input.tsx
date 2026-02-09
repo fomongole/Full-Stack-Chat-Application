@@ -20,8 +20,8 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
                     className={cn(
                         "flex h-11 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-black ring-offset-white file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-zinc-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50 transition-all shadow-sm",
                         "dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-50 dark:ring-offset-zinc-950 dark:placeholder:text-zinc-600",
-                        startIcon && "pl-10", // Add padding if icon exists
-                        endIcon && "pr-10",   // Add padding if icon exists
+                        startIcon && "pl-10",
+                        endIcon && "pr-10",
                         className
                     )}
                     ref={ref}

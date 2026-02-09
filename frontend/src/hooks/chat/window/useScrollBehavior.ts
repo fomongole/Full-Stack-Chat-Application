@@ -28,14 +28,10 @@ export const useScrollBehavior = ({
                                       markAsRead,
                                   }: UseScrollBehaviorProps) => {
     const [unreadBelowCount, setUnreadBelowCount] = useState(0);
-    const [isUserScrollingUp, setIsUserScrollingUp] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
 
     // Track the last message ID we processed to prevent recount loops
     const lastProcessedMessageId = useRef<string | null>(null);
-    const lastScrollTop = useRef<number>(0);
-    const isProgrammaticScroll = useRef<boolean>(false);
-    const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     // Track previous active user for Derived State
     const [prevActiveUserId, setPrevActiveUserId] = useState(activeUserId);
@@ -45,15 +41,12 @@ export const useScrollBehavior = ({
     if (activeUserId !== prevActiveUserId) {
         setPrevActiveUserId(activeUserId);
         setUnreadBelowCount(0);
-        setIsUserScrollingUp(false);
     }
 
     // 2. EFFECT: Reset the Ref (Side Effect)
     // Required: Ref updates must happen inside useEffect, not render
     useEffect(() => {
         lastProcessedMessageId.current = null;
-        lastScrollTop.current = 0;
-        isProgrammaticScroll.current = false;
     }, [activeUserId]);
 
     /**
@@ -74,8 +67,7 @@ export const useScrollBehavior = ({
         // If I am NOT the author, and I am NOT at the bottom, increment unread
         if (lastMessage.authorId !== currentUserId) {
             const { scrollTop, scrollHeight, clientHeight } = container;
-            const distanceToBottom = scrollHeight - scrollTop - clientHeight;
-            const isNearBottom = distanceToBottom < 200;
+            const isNearBottom = scrollHeight - scrollTop - clientHeight < 200;
 
             if (!isNearBottom) {
                 // Wrap in setTimeout to avoid "setState during render" warning from parent updates
@@ -87,47 +79,13 @@ export const useScrollBehavior = ({
     }, [chatHistory, currentUserId]);
 
     /**
-     * Effect: Reset isUserScrollingUp after a period of no scrolling
-     */
-    useEffect(() => {
-        return () => {
-            if (scrollTimeoutRef.current) {
-                clearTimeout(scrollTimeoutRef.current);
-            }
-        };
-    }, []);
-
-    /**
      * Scroll Event Handler
      */
     const handleScroll = useCallback(() => {
         const container = containerRef.current;
         if (!container || !conversationId || !activeUserId) return;
 
-        // Don't update scroll direction if it's a programmatic scroll
-        if (isProgrammaticScroll.current) {
-            isProgrammaticScroll.current = false;
-            return;
-        }
-
         const { scrollTop, scrollHeight, clientHeight } = container;
-
-        // Determine scroll direction
-        if (scrollTop < lastScrollTop.current) {
-            setIsUserScrollingUp(true);
-            // Clear any existing timeout
-            if (scrollTimeoutRef.current) {
-                clearTimeout(scrollTimeoutRef.current);
-            }
-            // Set a timeout to reset isUserScrollingUp after 1 second of no scrolling
-            scrollTimeoutRef.current = setTimeout(() => {
-                setIsUserScrollingUp(false);
-            }, 1000);
-        } else if (scrollTop > lastScrollTop.current) {
-            setIsUserScrollingUp(false);
-        }
-
-        lastScrollTop.current = scrollTop;
 
         // 1. Pagination: User scrolled to top
         if (
@@ -165,21 +123,17 @@ export const useScrollBehavior = ({
 
     const scrollToBottom = useCallback(() => {
         if (containerRef.current) {
-            isProgrammaticScroll.current = true;
             containerRef.current.scrollTo({
                 top: containerRef.current.scrollHeight,
                 behavior: 'smooth',
             });
             setUnreadBelowCount(0);
-            setIsUserScrollingUp(false);
         }
     }, []);
 
     const scrollToBottomInstant = useCallback(() => {
         if (containerRef.current) {
-            isProgrammaticScroll.current = true;
             containerRef.current.scrollTop = containerRef.current.scrollHeight;
-            setIsUserScrollingUp(false);
         }
     }, []);
 
@@ -189,6 +143,5 @@ export const useScrollBehavior = ({
         handleScroll,
         scrollToBottom,
         scrollToBottomInstant,
-        isUserScrollingUp,
     };
 };

@@ -66,7 +66,7 @@ export function ChatInput({ value, onChange, onSend, replyTo, onCancelReply, isB
             }
         } else {
             onSend(e);
-            // FIX 1: Keep focus on the input after sending to prevent keyboard from closing
+            // Keep focus on the input after sending to prevent keyboard from closing
             requestAnimationFrame(() => {
                 textareaRef.current?.focus();
             });
@@ -134,7 +134,7 @@ export function ChatInput({ value, onChange, onSend, replyTo, onCancelReply, isB
 
                 <div className="flex-1 bg-zinc-100 dark:bg-zinc-800/80 rounded-[24px] border border-transparent transition-all flex items-center px-4 py-2">
                     <TextareaAutosize
-                        ref={textareaRef as any}
+                        ref={textareaRef}
                         minRows={1}
                         maxRows={6}
                         value={value}
@@ -153,7 +153,7 @@ export function ChatInput({ value, onChange, onSend, replyTo, onCancelReply, isB
                 <Button
                     type="submit"
                     disabled={isUploading || (!value.trim() && !selectedFile)}
-                    // FIX 2: This prevents the button from stealing focus from the input when clicked on mobile
+                    // This prevents the button from stealing focus from the input when clicked on mobile
                     onMouseDown={(e) => e.preventDefault()}
                     className="h-12 w-12 rounded-full p-0 flex items-center justify-center shrink-0 mb-0.5 bg-primary hover:bg-primary/90 text-white shadow-lg active:scale-90 transition-transform disabled:opacity-50"
                 >

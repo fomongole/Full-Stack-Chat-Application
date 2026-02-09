@@ -2,7 +2,7 @@ import React from 'react';
 import { User } from '@/types';
 import { useChatStore } from '@/store/useChatStore';
 import { useAuthStore } from '@/store/useAuthStore';
-import { useUserSearch } from '@/hooks/chat/useUserSearch';
+import { useUserSearch } from '@/hooks/chat/sidebar/useUserSearch';
 import { SidebarHeader } from './sidebar/SidebarHeader';
 import { SidebarUserItem } from './sidebar/SidebarUserItem';
 import { SidebarFooter } from './sidebar/SidebarFooter';
@@ -117,7 +117,7 @@ function EmptyState({
                     </div>
                     <p className="text-sm text-zinc-500">
                         No users found for{' '}
-                        <span className="font-semibold">"{searchQuery}"</span>
+                        <span className="font-semibold">&#34;{searchQuery}&#34;</span>
                     </p>
                 </div>
             </div>
