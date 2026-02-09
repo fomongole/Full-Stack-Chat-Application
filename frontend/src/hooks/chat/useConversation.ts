@@ -24,6 +24,8 @@ export const useConversation = (activeUser: User | null) => {
     const lastTypingEmitRef = useRef<number>(0);
     const activeUserRef = useRef(activeUser);
     const conversationIdRef = useRef(conversationId);
+    const oldScrollHeightRef = useRef(0);
+    const preserveScrollPositionRef = useRef(false);
 
     useEffect(() => { activeUserRef.current = activeUser; }, [activeUser]);
     useEffect(() => { conversationIdRef.current = conversationId; }, [conversationId]);
@@ -35,6 +37,13 @@ export const useConversation = (activeUser: User | null) => {
     const loadMoreMessages = useCallback(() => {
         if (!socket || !conversationId || !hasMore || isLoadingMore || chatHistory.length === 0) return;
 
+        // Store current scroll position before loading more
+        const container = containerRef.current;
+        if (container) {
+            preserveScrollPositionRef.current = true;
+            oldScrollHeightRef.current = container.scrollHeight;
+        }
+
         setIsLoadingMore(true);
         const oldestMessageId = chatHistory[0].id;
         socket.emit("load_more_messages", { conversationId, cursor: oldestMessageId });
@@ -44,18 +53,22 @@ export const useConversation = (activeUser: User | null) => {
         const container = containerRef.current;
         if (!container) return;
 
-        // Pagination trigger
-        if (container.scrollTop < 50 && hasMore && !isLoadingMore) {
+        // Pagination trigger - only load more if we're at the top
+        const scrollTop = container.scrollTop;
+        const scrollHeight = container.scrollHeight;
+        const clientHeight = container.clientHeight;
+
+        if (scrollTop < 100 && hasMore && !isLoadingMore && chatHistory.length > 0) {
             loadMoreMessages();
         }
 
-        // Unread counter
-        const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+        // Unread counter - clear when near bottom
+        const isNearBottom = scrollHeight - scrollTop - clientHeight < 200;
         if (isNearBottom) {
             setUnreadBelowCount(0);
             countedMessageIds.current.clear();
         }
-    }, [hasMore, isLoadingMore, loadMoreMessages]);
+    }, [hasMore, isLoadingMore, loadMoreMessages, chatHistory.length]);
 
     useEffect(() => {
         if (activeUser?.id) {
@@ -63,8 +76,26 @@ export const useConversation = (activeUser: User | null) => {
             setUnreadBelowCount(0);
             countedMessageIds.current.clear();
             setHasMore(false);
+            setChatHistory([]);
+            preserveScrollPositionRef.current = false;
         }
     }, [activeUser?.id]);
+
+    // Adjust scroll position after loading more messages
+    useEffect(() => {
+        if (preserveScrollPositionRef.current && containerRef.current && !isLoadingMore) {
+            const container = containerRef.current;
+            const newScrollHeight = container.scrollHeight;
+            const scrollDifference = newScrollHeight - oldScrollHeightRef.current;
+
+            if (scrollDifference > 0) {
+                container.scrollTop += scrollDifference;
+            }
+
+            preserveScrollPositionRef.current = false;
+            oldScrollHeightRef.current = 0;
+        }
+    }, [isLoadingMore, chatHistory]);
 
     // Socket listeners
     useEffect(() => {
@@ -72,6 +103,7 @@ export const useConversation = (activeUser: User | null) => {
 
         setIsLoadingHistory(true);
         setChatHistory([]);
+        isInitialLoad.current = true;
 
         socket.emit("join_conversation", { recipientId: activeUser.id });
 
@@ -97,7 +129,10 @@ export const useConversation = (activeUser: User | null) => {
 
         const handleReceiveMessage = (newMessage: Message) => {
             setChatHistory((prev) => {
-                const filtered = prev.filter(m => !m.isLocal || (m.isLocal && m.attachmentUrl !== newMessage.attachmentUrl && m.id !== newMessage.id));
+                const filtered = prev.filter(m =>
+                    !m.isLocal ||
+                    (m.isLocal && m.attachmentUrl !== newMessage.attachmentUrl && m.id !== newMessage.id)
+                );
                 if (filtered.some(m => m.id === newMessage.id)) return filtered;
                 return [...filtered, newMessage];
             });
@@ -106,7 +141,11 @@ export const useConversation = (activeUser: User | null) => {
             const isFromOther = newMessage.authorId !== currentUser?.id;
 
             if (container && isFromOther) {
-                const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150;
+                const scrollTop = container.scrollTop;
+                const scrollHeight = container.scrollHeight;
+                const clientHeight = container.clientHeight;
+                const isNearBottom = scrollHeight - scrollTop - clientHeight < 300;
+
                 if (!isNearBottom && !countedMessageIds.current.has(newMessage.id)) {
                     setUnreadBelowCount(prev => prev + 1);
                     countedMessageIds.current.add(newMessage.id);
@@ -185,7 +224,12 @@ export const useConversation = (activeUser: User | null) => {
 
         setChatHistory(prev => [...prev, optimisticMessage]);
 
-        socket.emit("send_message", { conversationId, recipientId: activeUser.id, message, replyToId: replyTo?.id });
+        socket.emit("send_message", {
+            conversationId,
+            recipientId: activeUser.id,
+            message,
+            replyToId: replyTo?.id
+        });
 
         setMessage('');
         setReplyTo(null);
@@ -198,20 +242,50 @@ export const useConversation = (activeUser: User | null) => {
         const objectUrl = URL.createObjectURL(file);
         const type = file.type.startsWith('video/') ? 'VIDEO' : 'IMAGE';
         const optimisticMessage: Message & { isLocal?: boolean } = {
-            id: tempId, conversationId, authorId: currentUser.id, username: currentUser.username,
-            image: currentUser.image, message: caption, content: caption, messageType: type,
-            attachmentUrl: objectUrl, isDeleted: false, isRead: false, timestamp: new Date().toISOString(),
-            isLocal: true, replyTo: replyTo ? { id: replyTo.id, username: replyTo.username, content: replyTo.content || "Media" } : null
+            id: tempId,
+            conversationId,
+            authorId: currentUser.id,
+            username: currentUser.username,
+            image: currentUser.image,
+            message: caption,
+            content: caption,
+            messageType: type,
+            attachmentUrl: objectUrl,
+            isDeleted: false,
+            isRead: false,
+            timestamp: new Date().toISOString(),
+            isLocal: true,
+            replyTo: replyTo ? {
+                id: replyTo.id,
+                username: replyTo.username,
+                content: replyTo.content || "Media"
+            } : null
         };
+
         setChatHistory(prev => [...prev, optimisticMessage]);
         setReplyTo(null);
+
         const formData = new FormData();
         formData.append('file', file);
+
         try {
-            const response = await api.post('/users/upload-media', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+            const response = await api.post('/users/upload-media', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            });
             const { url, type: serverType } = response.data.data;
-            setChatHistory(prev => prev.map(msg => msg.id === tempId ? { ...msg, attachmentUrl: url } : msg));
-            socket.emit("send_message", { conversationId, recipientId: activeUser.id, message: caption, replyToId: replyTo?.id, attachmentUrl: url, messageType: serverType });
+
+            setChatHistory(prev => prev.map(msg =>
+                msg.id === tempId ? { ...msg, attachmentUrl: url } : msg
+            ));
+
+            socket.emit("send_message", {
+                conversationId,
+                recipientId: activeUser.id,
+                message: caption,
+                replyToId: replyTo?.id,
+                attachmentUrl: url,
+                messageType: serverType
+            });
         } catch (error) {
             setChatHistory(prev => prev.filter(m => m.id !== tempId));
             throw error;
@@ -226,16 +300,29 @@ export const useConversation = (activeUser: User | null) => {
     const handleTyping = useCallback((text: string) => {
         setMessage(text);
         if (!socket || !conversationId || !activeUser || currentUser?.isPrivate || isBlocked) return;
+
         const now = Date.now();
         if (now - lastTypingEmitRef.current > 2000) {
             socket.emit("typing", { conversationId, recipientId: activeUser.id });
             lastTypingEmitRef.current = now;
         }
+
         if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
         typingTimeoutRef.current = setTimeout(() => {
             if (activeUser) socket.emit("stop_typing", { conversationId, recipientId: activeUser.id });
         }, 3000);
     }, [socket, conversationId, activeUser, currentUser, isBlocked]);
+
+    const scrollToBottom = useCallback(() => {
+        if (containerRef.current) {
+            containerRef.current.scrollTo({
+                top: containerRef.current.scrollHeight,
+                behavior: 'smooth'
+            });
+            setUnreadBelowCount(0);
+            countedMessageIds.current.clear();
+        }
+    }, []);
 
     return {
         message,
@@ -253,6 +340,8 @@ export const useConversation = (activeUser: User | null) => {
         handleScroll,
         isBlocked,
         isLoadingMore,
-        isInitialLoad
+        isInitialLoad,
+        scrollToBottom,
+        conversationId
     };
 };

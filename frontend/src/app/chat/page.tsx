@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect, useRef } from 'react'; // Removed unused useState
+import React, { useEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useChatStore } from '@/store/useChatStore';
 import { useConversation } from '@/hooks/chat/useConversation';
@@ -14,66 +14,88 @@ import { Loader2, ChevronDown } from 'lucide-react';
 export default function ChatPage() {
     const activeUser = useChatStore((state) => state.activeUser) as User | null;
     const currentUser = useAuthStore((state) => state.user);
+
     const {
         message, setMessage, chatHistory, isLoadingHistory, sendMessage,
         sendMediaMessage, deleteMessage, replyTo, setReplyTo,
         isRemoteTyping, containerRef,
         unreadBelowCount, handleScroll,
-        isBlocked, isLoadingMore, isInitialLoad
+        isBlocked, isLoadingMore, isInitialLoad,
+        scrollToBottom, conversationId
     } = useConversation(activeUser);
 
-    // NEW: Ref to track previous history length for detecting prepends/appends
-    const prevHistoryLengthRef = useRef(chatHistory.length);
+    const [shouldScrollToBottom, setShouldScrollToBottom] = useState(false);
+    const lastChatHistoryLengthRef = useRef(0);
+    const isFirstLoadRef = useRef(true);
 
-    // Virtualizer setup (increased estimateSize for better handling of media messages)
+    // Simplified virtualizer - remove for small chats if problematic
     const virtualizer = useVirtualizer({
         count: chatHistory.length,
         getScrollElement: () => containerRef.current,
-        estimateSize: () => 100, // CHANGED: Was 80; better for variable heights (text + media)
+        estimateSize: () => 100,
         overscan: 5,
-        measureElement: typeof window !== 'undefined' && navigator.userAgent.indexOf('Firefox') === -1
-            ? (element) => element?.getBoundingClientRect().height
-            : undefined,
+        scrollMargin: 50,
     });
+
     const items = virtualizer.getVirtualItems();
 
-    // NEW: General auto-scroll for appends (new messages) + prepend detection
+    // Initial load scroll to bottom
     useEffect(() => {
-        if (!containerRef.current) return;
+        if (isInitialLoad.current && !isLoadingHistory && chatHistory.length > 0) {
+            isInitialLoad.current = false;
 
-        const lengthDelta = chatHistory.length - prevHistoryLengthRef.current;
-        const oldScrollTop = containerRef.current.scrollTop;
-        const oldScrollHeight = virtualizer.getTotalSize(); // Use virtual total size
-        const wasNearBottom = oldScrollHeight - oldScrollTop - containerRef.current.clientHeight < 150;
+            // Small delay to ensure DOM is ready
+            setTimeout(() => {
+                if (containerRef.current) {
+                    containerRef.current.scrollTop = containerRef.current.scrollHeight;
+                }
+            }, 100);
+        }
+    }, [isLoadingHistory, chatHistory.length]);
 
-        if (lengthDelta > 0) { // History grew (append or prepend)
-            if (wasNearBottom && !isInitialLoad.current) {
-                // Append case: Auto-scroll to new end if was near bottom (smooth for UX)
-                virtualizer.scrollToIndex(chatHistory.length - 1, { align: 'end', behavior: 'smooth' });
-            } else if (isLoadingMore) {
-                // Prepend case (load more older): Scroll to the start of the old content to prevent jump (instant)
-                virtualizer.scrollToIndex(lengthDelta, { align: 'start', behavior: 'auto' });
+    // Auto-scroll for new messages
+    useEffect(() => {
+        if (!isFirstLoadRef.current && containerRef.current && chatHistory.length > 0) {
+            const container = containerRef.current;
+            const lastMessage = chatHistory[chatHistory.length - 1];
+            const isMyMessage = lastMessage.authorId === currentUser?.id;
+
+            // Check if we're near the bottom
+            const scrollBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+            const isNearBottom = scrollBottom < 300;
+
+            // Scroll if it's my message OR if we're already near bottom
+            if (isMyMessage || isNearBottom) {
+                setTimeout(() => {
+                    if (containerRef.current) {
+                        containerRef.current.scrollTop = containerRef.current.scrollHeight;
+                    }
+                }, 50);
             }
         }
 
-        prevHistoryLengthRef.current = chatHistory.length;
-    }, [chatHistory.length, virtualizer, isLoadingMore, isInitialLoad]); // Dependencies: Trigger on length or load more changes
+        if (chatHistory.length > 0) {
+            isFirstLoadRef.current = false;
+        }
 
-    // CHANGED: Auto-scroll to bottom on initial load (use scrollToIndex for virtual accuracy; try without timeout first)
+        lastChatHistoryLengthRef.current = chatHistory.length;
+    }, [chatHistory, currentUser?.id]);
+
+    // Handle when user is near bottom and new message arrives
     useEffect(() => {
-        if (!isLoadingHistory && chatHistory.length > 0 && isInitialLoad.current && containerRef.current) {
-            virtualizer.scrollToIndex(chatHistory.length - 1, { align: 'end', behavior: 'auto' });
-            isInitialLoad.current = false;
-        }
-    }, [isLoadingHistory, chatHistory.length, virtualizer]); // Removed timeout—add back as setTimeout(..., 100) if heights still load async
+        if (containerRef.current && chatHistory.length > lastChatHistoryLengthRef.current) {
+            const container = containerRef.current;
+            const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 400;
 
-    // REMOVED: The send-message auto-scroll effect (now handled by the general append useEffect above)
-
-    const scrollToBottom = () => {
-        if (containerRef.current) {
-            virtualizer.scrollToIndex(chatHistory.length - 1, { align: 'end', behavior: 'smooth' });
+            if (isNearBottom) {
+                setTimeout(() => {
+                    if (containerRef.current) {
+                        containerRef.current.scrollTop = containerRef.current.scrollHeight;
+                    }
+                }, 100);
+            }
         }
-    };
+    }, [chatHistory.length]);
 
     if (!activeUser) return (
         <div className="flex-1 flex flex-col items-center justify-center h-full bg-[#f0f2f5] dark:bg-[#111b21] border-b-[6px] border-green-500">
@@ -91,13 +113,16 @@ export default function ChatPage() {
     return (
         <div className="flex flex-col h-full w-full overflow-hidden relative bg-[#efeae2] dark:bg-[#0b141a]">
             <div className="absolute inset-0 opacity-[0.06] dark:opacity-[0.03] pointer-events-none bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')] z-0"></div>
+
             <div className="flex-none z-10 w-full">
                 <ChatHeader user={activeUser} isTyping={isRemoteTyping} />
             </div>
+
             <div
                 ref={containerRef}
                 onScroll={handleScroll}
                 className="flex-1 overflow-y-auto relative z-0 custom-scrollbar overscroll-contain"
+                style={{ scrollBehavior: 'smooth' }}
             >
                 {isLoadingHistory ? (
                     <div className="flex flex-col items-center justify-center h-full space-y-4">
@@ -110,28 +135,37 @@ export default function ChatPage() {
                             height: `${virtualizer.getTotalSize()}px`,
                             width: '100%',
                             position: 'relative',
+                            paddingTop: isLoadingMore ? '40px' : '0',
                         }}
-                        className="p-4 md:px-8 md:py-4"
+                        className="px-4 pb-4"
                     >
-                        {/* Pagination loader */}
+                        {/* Pagination loader at top */}
                         {isLoadingMore && (
-                            <div className="flex justify-center py-4">
-                                <Loader2 className="w-6 h-6 text-primary animate-spin opacity-60" />
+                            <div className="absolute top-0 left-0 right-0 flex justify-center py-2 bg-gradient-to-b from-white/80 dark:from-[#0b141a]/80 backdrop-blur-sm z-10">
+                                <Loader2 className="w-5 h-5 text-primary animate-spin opacity-70" />
                             </div>
                         )}
+
+                        {/* Date headers and messages */}
                         {items.map((virtualRow) => {
                             const msg = chatHistory[virtualRow.index];
+                            if (!msg) return null;
+
                             const previousMsg = chatHistory[virtualRow.index - 1];
                             const nextMsg = chatHistory[virtualRow.index + 1];
-                            const isFromMe = msg.username !== activeUser.username;
-                            const isFirstInGroup = !previousMsg || previousMsg.username !== msg.username ||
+                            const isFromMe = msg.authorId === currentUser?.id;
+
+                            const isFirstInGroup = !previousMsg || previousMsg.authorId !== msg.authorId ||
                                 getMessageDateLabel(msg.timestamp) !== getMessageDateLabel(previousMsg.timestamp);
-                            const isLastInGroup = !nextMsg || nextMsg.username !== msg.username;
+
+                            const isLastInGroup = !nextMsg || nextMsg.authorId !== msg.authorId;
+
                             const showDateHeader = virtualRow.index === 0 ||
                                 getMessageDateLabel(msg.timestamp) !== getMessageDateLabel(chatHistory[virtualRow.index - 1].timestamp);
+
                             return (
                                 <div
-                                    key={virtualRow.key}
+                                    key={msg.id}
                                     data-index={virtualRow.index}
                                     ref={virtualizer.measureElement}
                                     style={{
@@ -143,7 +177,7 @@ export default function ChatPage() {
                                     }}
                                 >
                                     {showDateHeader && (
-                                        <div className="flex justify-center my-6">
+                                        <div className="flex justify-center my-4">
                                             <span className="text-[11px] font-medium text-[#54656f] dark:text-[#8696a0] bg-[#eef0f2] dark:bg-[#1f2c34] px-3 py-1.5 rounded-lg shadow-sm border border-black/5">
                                                 {getMessageDateLabel(msg.timestamp)}
                                             </span>
@@ -162,6 +196,7 @@ export default function ChatPage() {
                         })}
                     </div>
                 )}
+
                 {/* Scroll to bottom button */}
                 {unreadBelowCount > 0 && (
                     <button
@@ -175,6 +210,7 @@ export default function ChatPage() {
                     </button>
                 )}
             </div>
+
             <div className="flex-none z-20 w-full bg-[#f0f2f5] dark:bg-[#202c33]">
                 <ChatInput
                     value={message}
