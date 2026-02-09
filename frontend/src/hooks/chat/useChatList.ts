@@ -1,180 +1,170 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'; // Import useRef
-import { api } from '@/lib/api';
+import { useCallback, useEffect, useRef } from 'react';
 import { useSocket } from '@/hooks/useSocket';
 import { useChatStore } from '@/store/useChatStore';
-import { toast } from "sonner";
-import { User } from '@/types';
+import { toast } from 'sonner';
+import { useUserState } from './useUserState';
+import { useUserSocket } from './useUserSocket';
+import { useUserApi } from './useUserApi';
+import { useBackgroundSync } from './useBackgroundSync';
 
-export const useChatList = (enableUpdates = true) => {
-    const [rawUsers, setRawUsers] = useState<User[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
-    const [, setTick] = useState(0);
+interface UseChatListOptions {
+    enableUpdates?: boolean;
+    enableBackgroundSync?: boolean;
+}
 
-    // 1. REF TO TRACK USERS INSTANTLY
-    const usersRef = useRef<User[]>([]);
-
+/**
+ * Refactored useChatList hook.
+ * Clean facade that composes specialized hooks.
+ *
+ * Architecture:
+ * - useUserState: Pure state management
+ * - useUserSocket: Socket event handling
+ * - useUserApi: API calls
+ * - useBackgroundSync: Optional background updates
+ */
+export const useChatList = ({
+                                enableUpdates = true,
+                                enableBackgroundSync = false, // Disabled by default since we have sockets
+                            }: UseChatListOptions = {}) => {
     const socket = useSocket();
     const setActiveUser = useChatStore((state) => state.setActiveUser);
     const selectedUser = useChatStore((state) => state.activeUser);
 
-    // 2. KEEP REF SYNCED WITH STATE
+    // Track users for synchronous access (needed for socket handlers)
+    const usersRef = useRef<any[]>([]);
+
+    // 1. USER STATE MANAGEMENT
+    const {
+        users,
+        rawUsers,
+        isLoading,
+        setUsers,
+        startLoading,
+        updateUserStatus,
+        updateUser,
+        setUserTyping,
+        updateLastMessage,
+        resetUnreadCount,
+    } = useUserState();
+
+    // Keep ref in sync for socket handlers
     useEffect(() => {
         usersRef.current = rawUsers;
     }, [rawUsers]);
 
-    const users = useMemo(() => {
-        const uniqueUsersMap = new Map<string, User>();
-        rawUsers.forEach((user) => {
-            uniqueUsersMap.set(user.id, user);
-        });
-        const uniqueUsers = Array.from(uniqueUsersMap.values());
+    // 2. API CALLS
+    const { fetchUsers } = useUserApi({
+        onUsersLoaded: setUsers,
+        startLoading,
+        shouldShowInitialLoader: usersRef.current.length === 0,
+    });
 
-        return uniqueUsers.sort((a, b) => {
-            const timeA = new Date(a.lastActivity || 0).getTime();
-            const timeB = new Date(b.lastActivity || 0).getTime();
-            if (timeB !== timeA) return timeB - timeA;
-            if (a.isOnline !== b.isOnline) return a.isOnline ? -1 : 1;
-            return 0;
-        });
-    }, [rawUsers]);
+    // 3. SOCKET EVENT HANDLERS
+    const handleStatusChange = useCallback(
+        (data: { userId: string; isOnline: boolean; lastSeen: string }) => {
+            // Update in user list
+            updateUserStatus(data.userId, {
+                isOnline: data.isOnline,
+                lastSeen: data.lastSeen,
+            });
 
-    const forceUpdate = useCallback(() => {
-        setTick(t => t + 1);
-    }, []);
-
-    const fetchUsers = useCallback(async () => {
-        try {
-            // Only show loading on FIRST load, not background refreshes
-            if (usersRef.current.length === 0) setIsLoading(true);
-
-            const response = await api.get('/users');
-            setRawUsers(response.data.data.users);
-        } catch (error) {
-            console.error("Failed to load users:", error);
-        } finally {
-            setIsLoading(false);
-        }
-    }, []);
-
-    useEffect(() => {
-        fetchUsers();
-    }, [fetchUsers]);
-
-    // INSTANT READ RESET
-    useEffect(() => {
-        if (selectedUser) {
-            setRawUsers(prev => prev.map(u =>
-                u.id === selectedUser.id ? { ...u, unreadCount: 0 } : u
-            ));
-        }
-    }, [selectedUser?.id]);
-
-    useEffect(() => {
-        if (!enableUpdates) return;
-        const intervalId = setInterval(forceUpdate, 60000);
-        const handleVisibilityChange = () => {
-            if (document.visibilityState === 'visible') forceUpdate();
-        };
-        document.addEventListener("visibilitychange", handleVisibilityChange);
-        return () => {
-            clearInterval(intervalId);
-            document.removeEventListener("visibilitychange", handleVisibilityChange);
-        };
-    }, [forceUpdate, enableUpdates]);
-
-    useEffect(() => {
-        if (!socket || !enableUpdates) return;
-
-        const handleStatusChange = (data: { userId: string, isOnline: boolean, lastSeen: string }) => {
-            setRawUsers(prevUsers => prevUsers.map(user => {
-                if (user.id === data.userId) {
-                    const isBlocked = user.hasBlocked || user.isBlockedBy;
-                    return {
-                        ...user,
-                        isOnline: isBlocked ? false : data.isOnline,
-                        lastSeen: isBlocked ? user.lastSeen : data.lastSeen,
-                    };
-                }
-                return user;
-            }));
-
+            // Update active user if it's the same user
             if (selectedUser?.id === data.userId) {
                 const isBlocked = selectedUser.hasBlocked || selectedUser.isBlockedBy;
                 setActiveUser({
                     ...selectedUser,
                     isOnline: isBlocked ? false : data.isOnline,
-                    lastSeen: isBlocked ? selectedUser.lastSeen : data.lastSeen
+                    lastSeen: isBlocked ? selectedUser.lastSeen : data.lastSeen,
                 });
             }
-        };
+        },
+        [updateUserStatus, selectedUser, setActiveUser]
+    );
 
-        const handleUserUpdate = (data: any) => {
-            setRawUsers(prev => prev.map(u => u.id === data.userId ? { ...u, ...data } : u));
-            if (selectedUser?.id === data.userId) setActiveUser({ ...selectedUser, ...data });
-        };
+    const handleUserUpdate = useCallback(
+        (data: any) => {
+            updateUser(data.userId, data);
 
-        const handleTyping = (data: { userId: string }) => {
-            setRawUsers(prev => prev.map(u =>
-                u.id === data.userId ? { ...u, isTyping: true } : u
-            ));
-        };
+            if (selectedUser?.id === data.userId) {
+                setActiveUser({ ...selectedUser, ...data });
+            }
+        },
+        [updateUser, selectedUser, setActiveUser]
+    );
 
-        const handleStopTyping = (data: { userId: string }) => {
-            setRawUsers(prev => prev.map(u =>
-                u.id === data.userId ? { ...u, isTyping: false } : u
-            ));
-        };
+    const handleTyping = useCallback(
+        (data: { userId: string }) => {
+            setUserTyping(data.userId, true);
+        },
+        [setUserTyping]
+    );
 
-        const handleNewMessageNotification = async (data: { senderId: string, message: string, isOwn?: boolean }) => {
-            // Check the REF (synchronous, instant access to current state)
-            const userExists = usersRef.current.some(u => u.id === data.senderId);
+    const handleStopTyping = useCallback(
+        (data: { userId: string }) => {
+            setUserTyping(data.userId, false);
+        },
+        [setUserTyping]
+    );
+
+    const handleNewMessage = useCallback(
+        async (data: { senderId: string; message: string; isOwn?: boolean }) => {
+            // Check if user exists in our list (using ref for synchronous access)
+            const userExists = usersRef.current.some((u) => u.id === data.senderId);
 
             if (userExists) {
-                // OPTIMISTIC UPDATE: Update the list immediately without fetching
-                setRawUsers(prev => prev.map(u => {
-                    if (u.id === data.senderId) {
-                        const isCurrentChat = selectedUser?.id === data.senderId;
-                        const shouldIncrement = !data.isOwn && !isCurrentChat;
+                // Optimistic update - don't fetch, just update state
+                const isCurrentChat = selectedUser?.id === data.senderId;
+                const shouldIncrement = !data.isOwn && !isCurrentChat;
 
-                        return {
-                            ...u,
-                            lastMessage: data.message,
-                            lastActivity: new Date().toISOString(),
-                            unreadCount: shouldIncrement ? (u.unreadCount || 0) + 1 : (isCurrentChat ? 0 : (u.unreadCount || 0))
-                        };
-                    }
-                    return u;
-                }));
+                updateLastMessage(data.senderId, data.message, shouldIncrement);
             } else {
-                // Only fetch if it's genuinely a NEW user not in our list
+                // New user - fetch updated list
                 await fetchUsers();
             }
 
+            // Show notification for non-own messages from other users
             if (!data.isOwn && selectedUser?.id !== data.senderId) {
-                toast.info("New message received");
+                toast.info('New message received');
             }
-        };
+        },
+        [selectedUser, updateLastMessage, fetchUsers]
+    );
 
-        const handleRelationshipUpdate = async () => {
-            await fetchUsers();
-        };
+    const handleRelationshipUpdate = useCallback(async () => {
+        // Refetch users when relationships change (block/unblock)
+        await fetchUsers();
+    }, [fetchUsers]);
 
-        socket.on("user_status_change", handleStatusChange);
-        socket.on("user_update", handleUserUpdate);
-        socket.on("user_typing", handleTyping);
-        socket.on("user_stop_typing", handleStopTyping);
-        socket.on("new_message_notification", handleNewMessageNotification);
-        socket.on("user_relationship_update", handleRelationshipUpdate);
+    // 4. SOCKET EVENTS
+    useUserSocket({
+        socket,
+        activeUserId: selectedUser?.id || null,
+        onStatusChange: handleStatusChange,
+        onUserUpdate: handleUserUpdate,
+        onTyping: handleTyping,
+        onStopTyping: handleStopTyping,
+        onNewMessage: handleNewMessage,
+        onRelationshipUpdate: handleRelationshipUpdate,
+        enableUpdates,
+    });
 
-        return () => {
-            socket.off("user_status_change", handleStatusChange);
-            socket.off("user_update", handleUserUpdate);
-            socket.off("user_typing", handleTyping);
-            socket.off("user_stop_typing", handleStopTyping);
-            socket.off("new_message_notification", handleNewMessageNotification);
-            socket.off("user_relationship_update", handleRelationshipUpdate);
-        };
-    }, [socket, selectedUser, setActiveUser, fetchUsers, enableUpdates]);
+    // 5. BACKGROUND SYNC (Optional)
+    useBackgroundSync({
+        onSync: fetchUsers,
+        enabled: enableBackgroundSync && enableUpdates,
+        intervalMs: 60000,
+    });
 
-    return { users, isLoading, fetchUsers };
+    // 6. RESET UNREAD COUNT WHEN USER IS SELECTED
+    useEffect(() => {
+        if (selectedUser?.id) {
+            resetUnreadCount(selectedUser.id);
+        }
+    }, [selectedUser?.id, resetUnreadCount]);
+
+    return {
+        users,
+        isLoading,
+        fetchUsers,
+    };
 };
