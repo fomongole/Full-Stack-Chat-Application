@@ -20,7 +20,7 @@ interface MessageListProps {
 
 /**
  * Specialized MessageList component.
- * Fixed: Implements "Scroll Anchoring" to prevent jumping when loading older messages.
+ * Fixed: Robust Scroll Anchoring using Virtualizer Metrics.
  */
 export const MessageList: React.FC<MessageListProps> = ({
                                                             chatHistory,
@@ -33,51 +33,54 @@ export const MessageList: React.FC<MessageListProps> = ({
                                                             onScroll,
                                                             onInitialScrollComplete,
                                                         }) => {
-    // Refs for Scroll Anchoring
-    const prevScrollHeightRef = useRef<number>(0);
+    // Track previous list height to calculate precise scroll adjustments
+    const prevTotalSizeRef = useRef<number>(0);
     const hasInitiallyScrolledRef = useRef(false);
-    const prevLastMessageId = useRef<string | null>(null);
+
+    // Track the last message ID to detect "New Message" vs "History Load"
+    const prevLastMessageIdRef = useRef<string | null>(null);
 
     // Virtualizer setup
     const virtualizer = useVirtualizer({
         count: chatHistory.length,
         getScrollElement: () => containerRef.current,
-        estimateSize: () => 100, // Approximate height of a message
-        overscan: 10, // Render more items outside view to prevent white flashes
+        estimateSize: () => 100, // Reasonable estimate prevents jitter
+        overscan: 20, // High overscan ensures smooth scrolling into new area
     });
 
     const items = virtualizer.getVirtualItems();
+    const currentTotalSize = virtualizer.getTotalSize();
 
     /**
-     * FIX: Scroll Anchoring Logic
-     * Runs synchronously after DOM update but BEFORE paint.
-     * Calculates how much the list grew and adjusts scroll position.
+     * 1. ROBUST SCROLL ANCHORING
+     * We calculate the size difference using the Virtualizer's math, not the DOM.
+     * This runs synchronously before the browser paints the new frame.
      */
     useLayoutEffect(() => {
         const container = containerRef.current;
         if (!container) return;
 
-        const currentScrollHeight = container.scrollHeight;
-        const prevScrollHeight = prevScrollHeightRef.current;
+        const prevTotalSize = prevTotalSizeRef.current;
 
-        // If we have history, aren't loading, and the height grew (meaning items were added to top)
-        if (
-            prevScrollHeight > 0 &&
-            currentScrollHeight > prevScrollHeight &&
-            !isLoadingMore &&
-            !isLoadingHistory
-        ) {
-            // The magic formula: New Position = Old Position + (New Height - Old Height)
-            const heightDifference = currentScrollHeight - prevScrollHeight;
+        // If the content grew (meaning we loaded history at the top)
+        // AND we are not in the initial loading state
+        if (prevTotalSize > 0 && currentTotalSize > prevTotalSize && !isLoadingHistory) {
+
+            // Calculate how much pixel height was added to the top
+            const heightDifference = currentTotalSize - prevTotalSize;
+
+            // Immediately adjust scroll position by that exact amount
+            // This cancels out the "jump" and keeps the user's viewport static
             container.scrollTop = container.scrollTop + heightDifference;
         }
 
-        // Save current height for next render
-        prevScrollHeightRef.current = currentScrollHeight;
-    }, [chatHistory, isLoadingMore, isLoadingHistory, containerRef]);
+        // Update ref for the next render cycle
+        prevTotalSizeRef.current = currentTotalSize;
+    }, [currentTotalSize, isLoadingHistory, containerRef]);
 
     /**
-     * Initial Load: Scroll to bottom
+     * 2. INITIAL SCROLL TO BOTTOM
+     * Runs only once when the first batch of history is ready.
      */
     useEffect(() => {
         if (
@@ -86,17 +89,20 @@ export const MessageList: React.FC<MessageListProps> = ({
             chatHistory.length > 0 &&
             containerRef.current
         ) {
+            // Force scroll to bottom
             containerRef.current.scrollTop = containerRef.current.scrollHeight;
             hasInitiallyScrolledRef.current = true;
-            if (chatHistory.length > 0) {
-                prevLastMessageId.current = chatHistory[chatHistory.length - 1].id;
-            }
+
+            // Initialize the last message ID tracker
+            prevLastMessageIdRef.current = chatHistory[chatHistory.length - 1].id;
+
             onInitialScrollComplete?.();
         }
-    }, [isLoadingHistory, chatHistory.length, containerRef, onInitialScrollComplete]);
+    }, [isLoadingHistory, chatHistory, containerRef, onInitialScrollComplete]);
 
     /**
-     * Auto-scroll for NEW messages (Stick to bottom)
+     * 3. SMART AUTO-SCROLL (Stick to Bottom)
+     * Only scrolls down if a TRULY NEW message arrived (ID changed).
      */
     useEffect(() => {
         if (!hasInitiallyScrolledRef.current || chatHistory.length === 0) return;
@@ -105,29 +111,31 @@ export const MessageList: React.FC<MessageListProps> = ({
         if (!container) return;
 
         const lastMessage = chatHistory[chatHistory.length - 1];
+        const prevLastMessageId = prevLastMessageIdRef.current;
 
-        // Skip if last message hasn't changed (e.g., prepending older messages)
-        if (prevLastMessageId.current === lastMessage.id) return;
+        // If the last message ID is exactly the same as before,
+        // it means we just loaded history (or edited a message).
+        // In this case, DO NOT scroll to bottom.
+        if (lastMessage.id === prevLastMessageId) {
+            return;
+        }
 
-        prevLastMessageId.current = lastMessage.id;
+        // It's a new message! Update ref and check if we should scroll.
+        prevLastMessageIdRef.current = lastMessage.id;
 
         const isMyMessage = lastMessage.authorId === currentUserId;
-
-        // Check if user is near bottom
         const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
         const isNearBottom = distanceToBottom < 300;
 
-        // Only auto-scroll if I sent it OR if I'm already at the bottom
         if (isMyMessage || isNearBottom) {
-            // Small timeout to allow virtualizer to calculate exact size
-            setTimeout(() => {
+            requestAnimationFrame(() => {
                 if (containerRef.current) {
                     containerRef.current.scrollTo({
                         top: containerRef.current.scrollHeight,
                         behavior: 'smooth'
                     });
                 }
-            }, 50);
+            });
         }
     }, [chatHistory, currentUserId, containerRef]);
 
@@ -143,7 +151,7 @@ export const MessageList: React.FC<MessageListProps> = ({
     return (
         <div
             style={{
-                height: `${virtualizer.getTotalSize()}px`,
+                height: `${currentTotalSize}px`,
                 width: '100%',
                 position: 'relative',
             }}
@@ -166,7 +174,6 @@ export const MessageList: React.FC<MessageListProps> = ({
                 const nextMsg = chatHistory[virtualRow.index + 1];
                 const isFromMe = msg.authorId === currentUserId;
 
-                // Grouping Logic
                 const isFirstInGroup =
                     !previousMsg ||
                     previousMsg.authorId !== msg.authorId ||
