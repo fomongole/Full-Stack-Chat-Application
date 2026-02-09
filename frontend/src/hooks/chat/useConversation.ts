@@ -1,4 +1,4 @@
-import {useState, useEffect, useRef, useCallback} from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSocket } from '@/hooks/useSocket';
 import { useAuthStore } from '@/store/useAuthStore';
 import { User, Message } from '@/types';
@@ -25,9 +25,8 @@ export const useConversation = (activeUser: User | null) => {
     const activeUserRef = useRef(activeUser);
     const conversationIdRef = useRef(conversationId);
 
-    // Pagination scroll restoration refs
-    const oldScrollHeightRef = useRef(0);
-    const oldScrollTopRef = useRef(0);
+    // CRITICAL: Keep this as a ref to allow the Page component
+    // to coordinate scroll anchoring without re-renders.
     const isPaginationInProgress = useRef(false);
 
     useEffect(() => { activeUserRef.current = activeUser; }, [activeUser]);
@@ -39,36 +38,26 @@ export const useConversation = (activeUser: User | null) => {
 
     /**
      * Load more messages (pagination)
-     * Captures scroll position before loading to restore it after
      */
     const loadMoreMessages = useCallback(() => {
         if (!socket || !conversationId || !hasMore || isLoadingMore || chatHistory.length === 0) return;
 
-        const container = containerRef.current;
-        if (!container) return;
-
-        // Mark pagination as in progress
+        // Flag that we are prepending data so the Virtualizer can anchor the scroll
         isPaginationInProgress.current = true;
-
-        // Capture current scroll position
-        oldScrollHeightRef.current = container.scrollHeight;
-        oldScrollTopRef.current = container.scrollTop;
-
         setIsLoadingMore(true);
+
         const oldestMessageId = chatHistory[0].id;
         socket.emit("load_more_messages", { conversationId, cursor: oldestMessageId });
     }, [socket, conversationId, hasMore, isLoadingMore, chatHistory]);
 
     /**
-     * Scroll handler - triggers pagination and manages unread counter
+     * Scroll handler - triggered by the UI
      */
     const handleScroll = useCallback(() => {
         const container = containerRef.current;
         if (!container) return;
 
-        const scrollTop = container.scrollTop;
-        const scrollHeight = container.scrollHeight;
-        const clientHeight = container.clientHeight;
+        const { scrollTop, scrollHeight, clientHeight } = container;
 
         // Trigger pagination when scrolled near top
         if (scrollTop < 100 && hasMore && !isLoadingMore && chatHistory.length > 0) {
@@ -94,36 +83,8 @@ export const useConversation = (activeUser: User | null) => {
             countedMessageIds.current.clear();
             setHasMore(false);
             setChatHistory([]);
-            oldScrollHeightRef.current = 0;
-            oldScrollTopRef.current = 0;
         }
     }, [activeUser?.id]);
-
-    /**
-     * Restore scroll position after pagination completes
-     * This prevents auto-scroll-to-bottom from interfering
-     */
-    useEffect(() => {
-        if (!isLoadingMore && isPaginationInProgress.current && containerRef.current) {
-            const container = containerRef.current;
-
-            // Calculate how much the scroll height increased
-            const newScrollHeight = container.scrollHeight;
-            const scrollDifference = newScrollHeight - oldScrollHeightRef.current;
-
-            if (scrollDifference > 0) {
-                // Restore scroll position by adding the difference
-                // This keeps the user's view in the same place
-                container.scrollTop = oldScrollTopRef.current + scrollDifference;
-            }
-
-            // Clear pagination flag after a small delay
-            // This allows the scroll restoration to complete before auto-scroll resumes
-            requestAnimationFrame(() => {
-                isPaginationInProgress.current = false;
-            });
-        }
-    }, [isLoadingMore]);
 
     /**
      * Socket event listeners
@@ -156,44 +117,34 @@ export const useConversation = (activeUser: User | null) => {
             setChatHistory(prev => [...data.messages, ...prev]);
             setHasMore(data.hasMore);
             setIsLoadingMore(false);
+            // Note: isPaginationInProgress is reset by the Page component after scroll is adjusted
         };
 
         const handleReceiveMessage = (newMessage: Message) => {
             setChatHistory((prev) => {
-                // Filter out local optimistic messages
                 const filtered = prev.filter(m =>
                     !m.isLocal ||
                     (m.isLocal && m.attachmentUrl !== newMessage.attachmentUrl && m.id !== newMessage.id)
                 );
-
-                // Prevent duplicates
                 if (filtered.some(m => m.id === newMessage.id)) return filtered;
-
                 return [...filtered, newMessage];
             });
 
             const container = containerRef.current;
             const isFromOther = newMessage.authorId !== currentUser?.id;
 
-            // Update unread counter if message is from other and user is not near bottom
             if (container && isFromOther) {
-                const scrollTop = container.scrollTop;
-                const scrollHeight = container.scrollHeight;
-                const clientHeight = container.clientHeight;
-                const isNearBottom = scrollHeight - scrollTop - clientHeight < 300;
-
+                const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 300;
                 if (!isNearBottom && !countedMessageIds.current.has(newMessage.id)) {
                     setUnreadBelowCount(prev => prev + 1);
                     countedMessageIds.current.add(newMessage.id);
                 }
             }
 
-            // Clear typing indicator
             if (newMessage.authorId === activeUserRef.current?.id) {
                 setIsRemoteTyping(false);
             }
 
-            // Mark as read if visible
             if (document.visibilityState === 'visible' && newMessage.conversationId === conversationIdRef.current) {
                 socket.emit("mark_as_read", {
                     conversationId: newMessage.conversationId,
@@ -282,7 +233,7 @@ export const useConversation = (activeUser: User | null) => {
     };
 
     /**
-     * Send media message (image/video)
+     * Send media message
      */
     const sendMediaMessage = async (file: File, caption: string) => {
         if (isBlocked || !conversationId || !activeUser || !socket || !currentUser) return;
@@ -342,17 +293,11 @@ export const useConversation = (activeUser: User | null) => {
         }
     };
 
-    /**
-     * Delete message
-     */
     const deleteMessage = (messageId: string) => {
         if (!socket || !conversationId) return;
         socket.emit("delete_message", { conversationId, messageId });
     };
 
-    /**
-     * Handle typing indicator
-     */
     const handleTyping = useCallback((text: string) => {
         setMessage(text);
         if (!socket || !conversationId || !activeUser || currentUser?.isPrivate || isBlocked) return;
@@ -369,9 +314,7 @@ export const useConversation = (activeUser: User | null) => {
         }, 3000);
     }, [socket, conversationId, activeUser, currentUser, isBlocked]);
 
-    /**
-     * Scroll to bottom (with smooth animation for user-triggered action)
-     */
+    // UI-facing scroll to bottom
     const scrollToBottom = useCallback(() => {
         if (containerRef.current) {
             containerRef.current.scrollTo({
@@ -396,12 +339,13 @@ export const useConversation = (activeUser: User | null) => {
         isRemoteTyping,
         containerRef,
         unreadBelowCount,
+        setUnreadBelowCount,
         handleScroll,
         isBlocked,
         isLoadingMore,
         isInitialLoad,
         scrollToBottom,
         conversationId,
-        isPaginationInProgress: isPaginationInProgress.current
+        isPaginationInProgress // This is now a RefObject
     };
 };
