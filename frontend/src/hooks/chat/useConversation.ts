@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { useSocket } from '@/hooks/useSocket';
 import { useAuthStore } from '@/store/useAuthStore';
-import { User } from '@/types';
+import {Message, User} from '@/types';
 import { useMessageState } from './useMessageState';
 import { useSocketEmitters } from './useSocketEmitters'; // New import
 import { useSocketListeners } from './useSocketListeners'; // New import
@@ -70,30 +70,49 @@ export const useConversation = (activeUser: User | null) => {
         }
     };
 
-    const onMessageReceived = useCallback(
-        (message) => {
-            handleMessageReceived(message);
-            // Stop typing indicator
-            if (message.authorId === activeUserId) {
-                setIsRemoteTyping(false);
-            }
-            // Mark as read if visible and in current conversation
-            if (
-                document.visibilityState === 'visible' &&
-                message.conversationId === conversationId &&
-                activeUserId
-            ) {
-                markAsRead(message.conversationId, activeUserId);
-            }
-        },
-        [
-            handleMessageReceived,
-            activeUserId,
-            conversationId,
-            setIsRemoteTyping,
-            markAsRead,
-        ]
-    );
+    // const onMessageReceived = useCallback(
+    //     (message) => {
+    //         handleMessageReceived(message);
+    //         // Stop typing indicator
+    //         if (message.authorId === activeUserId) {
+    //             setIsRemoteTyping(false);
+    //         }
+    //         // Mark as read if visible and in current conversation
+    //         if (
+    //             document.visibilityState === 'visible' &&
+    //             message.conversationId === conversationId &&
+    //             activeUserId
+    //         ) {
+    //             markAsRead(message.conversationId, activeUserId);
+    //         }
+    //     },
+    //     [
+    //         handleMessageReceived,
+    //         activeUserId,
+    //         conversationId,
+    //         setIsRemoteTyping,
+    //         markAsRead,
+    //     ]
+    // );
+
+    // 2. Remove useCallback and add the type to the parameter
+    const onMessageReceived = (message: Message) => {
+        handleMessageReceived(message);
+
+        // Stop typing indicator
+        if (message.authorId === activeUserId) {
+            setIsRemoteTyping(false);
+        }
+
+        // Mark as read if visible and in current conversation
+        if (
+            document.visibilityState === 'visible' &&
+            message.conversationId === conversationId &&
+            activeUserId
+        ) {
+            markAsRead(message.conversationId, activeUserId);
+        }
+    };
 
     // 2. SOCKET EVENT ORCHESTRATION (split into emitters and listeners)
     useSocketListeners({
