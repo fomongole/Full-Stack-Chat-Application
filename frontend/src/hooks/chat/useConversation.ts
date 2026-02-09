@@ -76,20 +76,18 @@ export const useConversation = (activeUser: User | null) => {
             return;
         }
 
-        // 1. Initial Load: Always scroll to bottom
+        // Don't handle initial load here - let the dedicated useLayoutEffect handle it
         if (isInitialLoad.current) {
-            scrollToBottom('auto');
-            isInitialLoad.current = false;
             return;
         }
 
-        // 2. If WE sent the message: Always scroll to bottom
+        // If WE sent the message: Always scroll to bottom
         if (newMsgAuthorId === currentUser?.id) {
             scrollToBottom('smooth');
             return;
         }
 
-        // 3. Incoming message: Only scroll if user is already near the bottom
+        // Incoming message: Only scroll if user is already near the bottom
         const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150;
         if (isNearBottom) {
             scrollToBottom('smooth');
@@ -143,15 +141,25 @@ export const useConversation = (activeUser: User | null) => {
         }
     }, [activeUser?.id]);
 
-    // MAIN AUTO-SCROLL EFFECT
+    // ✅ NEW: DEDICATED INITIAL SCROLL EFFECT
+    // This runs BEFORE paint when initial history loads
+    useLayoutEffect(() => {
+        // Only run on initial history load (not pagination)
+        if (isInitialLoad.current && !isLoadingHistory && chatHistory.length > 0 && !isLoadingMore) {
+            scrollToBottom('auto');
+            isInitialLoad.current = false;
+        }
+    }, [isLoadingHistory, chatHistory.length, isLoadingMore, scrollToBottom]);
+
+    // MAIN AUTO-SCROLL EFFECT (for new messages after initial load)
     useEffect(() => {
         // CRITICAL: Block auto-scroll during pagination or deletion
-        // FIXED: Added isLoadingMore as additional guard
         if (
             isDeletingRef.current ||
             isPaginatingRef.current ||
             paginationAnchorRef.current?.shouldAnchor ||
-            isLoadingMore
+            isLoadingMore ||
+            isInitialLoad.current // Don't auto-scroll during initial load
         ) {
             return;
         }
@@ -161,7 +169,6 @@ export const useConversation = (activeUser: User | null) => {
         }
 
         // CLEANUP: Reset pagination flag AFTER auto-scroll check has completed
-        // This ensures the guards work properly during pagination
         if (!isLoadingMore && isPaginatingRef.current) {
             isPaginatingRef.current = false;
         }
