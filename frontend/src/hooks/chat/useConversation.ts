@@ -146,12 +146,24 @@ export const useConversation = (activeUser: User | null) => {
     // MAIN AUTO-SCROLL EFFECT
     useEffect(() => {
         // CRITICAL: Block auto-scroll during pagination or deletion
-        if (isDeletingRef.current || isPaginatingRef.current || paginationAnchorRef.current?.shouldAnchor) {
+        // FIXED: Added isLoadingMore as additional guard
+        if (
+            isDeletingRef.current ||
+            isPaginatingRef.current ||
+            paginationAnchorRef.current?.shouldAnchor ||
+            isLoadingMore
+        ) {
             return;
         }
 
-        if (!isLoadingHistory && !isLoadingMore && chatHistory.length > 0) {
+        if (!isLoadingHistory && chatHistory.length > 0) {
             handleAutoScroll(chatHistory[chatHistory.length - 1]?.authorId);
+        }
+
+        // CLEANUP: Reset pagination flag AFTER auto-scroll check has completed
+        // This ensures the guards work properly during pagination
+        if (!isLoadingMore && isPaginatingRef.current) {
+            isPaginatingRef.current = false;
         }
     }, [chatHistory, isLoadingHistory, isLoadingMore, handleAutoScroll]);
 
@@ -171,9 +183,9 @@ export const useConversation = (activeUser: User | null) => {
             // This keeps the user looking at the same message they were viewing
             container.scrollTop = previousScrollTop + heightDifference;
 
-            // Clean up pagination state
+            // Clean up pagination anchor ONLY
+            // DON'T reset isPaginatingRef here - let useEffect handle it
             paginationAnchorRef.current = null;
-            isPaginatingRef.current = false;
             return;
         }
 
@@ -187,11 +199,6 @@ export const useConversation = (activeUser: User | null) => {
             deleteAdjustment.current = null;
             isDeletingRef.current = false;
             return;
-        }
-
-        // Safety: Reset pagination flag if it somehow persists
-        if (isPaginatingRef.current && !isLoadingMore) {
-            isPaginatingRef.current = false;
         }
     }, [chatHistory, isLoadingMore]);
 
