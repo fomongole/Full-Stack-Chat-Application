@@ -22,7 +22,8 @@ export function ChatHeader({ user, isTyping }: ChatHeaderProps) {
 
     const setActiveUser = useChatStore((state) => state.setActiveUser);
     const menuRef = useRef<HTMLDivElement>(null);
-    const { fetchUsers } = useChatList(false);
+
+    const { fetchUsers } = useChatList({ enableUpdates: false });
 
     const isBlocked = user.hasBlocked || user.isBlockedBy;
 
