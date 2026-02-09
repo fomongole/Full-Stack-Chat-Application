@@ -3,7 +3,8 @@ import { useSocket } from '@/hooks/useSocket';
 import { useAuthStore } from '@/store/useAuthStore';
 import { User } from '@/types';
 import { useMessageState } from './useMessageState';
-import { useSocketEvents } from './useSocketEvents';
+import { useSocketEmitters } from './useSocketEmitters'; // New import
+import { useSocketListeners } from './useSocketListeners'; // New import
 import { useMessageActions } from './useMessageActions';
 import { useScrollBehavior } from './useScrollBehavior';
 
@@ -16,6 +17,7 @@ export const useConversation = (activeUser: User | null) => {
     const socket = useSocket();
     const currentUser = useAuthStore((state) => state.user);
     const isBlocked = activeUser?.hasBlocked || activeUser?.isBlockedBy;
+    const activeUserId = activeUser?.id ?? null;
 
     // 1. MESSAGE STATE MANAGEMENT (pure state, no side effects)
     const {
@@ -40,55 +42,67 @@ export const useConversation = (activeUser: User | null) => {
         startLoadingMore,
     } = useMessageState(activeUser?.id || null);
 
-    // 2. SOCKET EVENT ORCHESTRATION (pure event handling)
+    // Get socket emitters first to avoid circular dependencies
     const {
         markAsRead,
         loadMoreMessages: socketLoadMore,
         emitTyping,
         emitStopTyping,
-        activeUserIdRef,
-        conversationIdRef,
-    } = useSocketEvents({
+    } = useSocketEmitters({ socket });
+
+    // Define stable callbacks that can depend on emitters
+    // const onConversationJoined = useCallback(
+    //     (data: { conversationId: string }) => {
+    //         handleConversationJoined(data);
+    //         // Mark as read on join
+    //         if (activeUserId) {
+    //             markAsRead(data.conversationId, activeUserId);
+    //         }
+    //     },
+    //     [handleConversationJoined, markAsRead, activeUserId]
+    // );
+
+    // Remove useCallback and the dependency array entirely
+    const onConversationJoined = (data: { conversationId: string }) => {
+        handleConversationJoined(data);
+        if (activeUser?.id) {
+            markAsRead(data.conversationId, activeUser.id);
+        }
+    };
+
+    const onMessageReceived = useCallback(
+        (message) => {
+            handleMessageReceived(message);
+            // Stop typing indicator
+            if (message.authorId === activeUserId) {
+                setIsRemoteTyping(false);
+            }
+            // Mark as read if visible and in current conversation
+            if (
+                document.visibilityState === 'visible' &&
+                message.conversationId === conversationId &&
+                activeUserId
+            ) {
+                markAsRead(message.conversationId, activeUserId);
+            }
+        },
+        [
+            handleMessageReceived,
+            activeUserId,
+            conversationId,
+            setIsRemoteTyping,
+            markAsRead,
+        ]
+    );
+
+    // 2. SOCKET EVENT ORCHESTRATION (split into emitters and listeners)
+    useSocketListeners({
         socket,
         activeUserId: activeUser?.id || null,
-        currentUserId: currentUser?.id || null,
-        conversationId,
-        onConversationJoined: useCallback(
-            (data: { conversationId: string }) => {
-                handleConversationJoined(data);
-                // Mark as read on join
-                if (activeUser?.id) {
-                    markAsRead(data.conversationId, activeUser.id);
-                }
-            },
-            [handleConversationJoined, markAsRead, activeUser?.id]
-        ),
+        onConversationJoined,
         onHistoryLoaded: handleHistoryLoaded,
         onMoreMessagesLoaded: handleMoreMessagesLoaded,
-        onMessageReceived: useCallback(
-            (message) => {
-                handleMessageReceived(message);
-                // Stop typing indicator
-                if (message.authorId === activeUser?.id) {
-                    setIsRemoteTyping(false);
-                }
-                // Mark as read if visible and in current conversation
-                if (
-                    document.visibilityState === 'visible' &&
-                    message.conversationId === conversationId &&
-                    activeUser?.id
-                ) {
-                    markAsRead(message.conversationId, activeUser.id);
-                }
-            },
-            [
-                handleMessageReceived,
-                activeUser?.id,
-                conversationId,
-                setIsRemoteTyping,
-                markAsRead,
-            ]
-        ),
+        onMessageReceived,
         onMessageDeleted: handleMessageDeleted,
         onUserTyping: handleUserTyping,
         onUserStopTyping: handleUserStopTyping,
@@ -148,7 +162,6 @@ export const useConversation = (activeUser: User | null) => {
         isLoadingMore,
         conversationId,
         isRemoteTyping,
-
         // Message actions
         message,
         setMessage,
@@ -157,14 +170,12 @@ export const useConversation = (activeUser: User | null) => {
         sendMessage,
         sendMediaMessage,
         deleteMessage,
-
         // Scroll behavior
         containerRef,
         unreadBelowCount,
         handleScroll,
         scrollToBottom,
         scrollToBottomInstant,
-
         // Metadata
         isBlocked: isBlocked || false,
     };
