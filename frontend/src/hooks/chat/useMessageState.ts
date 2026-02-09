@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Message } from '@/types';
 
 /**
@@ -13,9 +13,16 @@ export const useMessageState = (activeUserId: string | null) => {
     const [conversationId, setConversationId] = useState<string | null>(null);
     const [isRemoteTyping, setIsRemoteTyping] = useState(false);
 
+    // Track the current active user to prevent race conditions in state updates
+    const activeUserIdRef = useRef(activeUserId);
+
     // Reset state when active user changes
     useEffect(() => {
+        activeUserIdRef.current = activeUserId;
         if (activeUserId) {
+            // We batch these updates or use a transition if available,
+            // but standard React setState batching handles this in Event handlers.
+            // Inside useEffect, this runs after render.
             setChatHistory([]);
             setIsLoadingHistory(true);
             setHasMore(false);
@@ -40,6 +47,7 @@ export const useMessageState = (activeUserId: string | null) => {
 
     const handleMoreMessagesLoaded = useCallback(
         (data: { messages: Message[]; hasMore: boolean }) => {
+            // Standardizing the merge: New older messages + Existing messages
             setChatHistory((prev) => [...data.messages, ...prev]);
             setHasMore(data.hasMore);
             setIsLoadingMore(false);
@@ -71,20 +79,20 @@ export const useMessageState = (activeUserId: string | null) => {
 
     const handleUserTyping = useCallback(
         (data: { userId: string }) => {
-            if (data.userId === activeUserId) {
+            if (data.userId === activeUserIdRef.current) {
                 setIsRemoteTyping(true);
             }
         },
-        [activeUserId]
+        []
     );
 
     const handleUserStopTyping = useCallback(
         (data: { userId: string }) => {
-            if (data.userId === activeUserId) {
+            if (data.userId === activeUserIdRef.current) {
                 setIsRemoteTyping(false);
             }
         },
-        [activeUserId]
+        []
     );
 
     const handleMessagesRead = useCallback(
