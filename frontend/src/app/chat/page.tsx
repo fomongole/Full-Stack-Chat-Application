@@ -77,7 +77,8 @@ export default function ChatPage() {
             <div
                 ref={containerRef}
                 onScroll={handleScroll}
-                className="flex-1 overflow-y-auto relative z-0 custom-scrollbar overscroll-contain"
+                // UPDATED: Added !overflow-anchor-none to disable browser auto-scroll behavior
+                className="flex-1 overflow-y-auto relative z-0 custom-scrollbar overscroll-contain !overflow-anchor-none"
                 style={{ scrollBehavior: 'auto' }}
             >
                 <MessageList
