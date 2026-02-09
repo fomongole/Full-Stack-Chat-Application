@@ -1,121 +1,85 @@
 'use client';
-import React from 'react';
-import { useChatStore } from '@/store/useChatStore';
-import { useConversation } from '@/hooks/chat/useConversation';
-import { User } from '@/types';
-import { getMessageDateLabel } from '@/lib/dateUtils';
-import { ChatHeader } from '@/components/chat/window/ChatHeader';
-import { MessageBubble } from '@/components/chat/window/MessageBubble';
-import { ChatInput } from '@/components/chat/window/ChatInput';
-import { Loader2, ChevronDown } from 'lucide-react';
 
-export default function ChatPage() {
-  const activeUser = useChatStore((state) => state.activeUser) as User | null;
-  const {
-    message, setMessage, chatHistory, isLoadingHistory, sendMessage,
-    sendMediaMessage, deleteMessage, replyTo, setReplyTo,
-    isRemoteTyping, scrollRef, containerRef,
-    unreadBelowCount, scrollToBottom, handleScroll,
-    isBlocked
-  } = useConversation(activeUser);
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { api } from '@/lib/api';
+import { Button } from '@/components/ui/Button';
+import { useAuthStore } from '@/store/useAuthStore';
+import { MessageSquare, ShieldCheck, Zap } from 'lucide-react';
 
-  if (!activeUser) return (
-      <div className="flex-1 flex flex-col items-center justify-center h-full bg-[#f0f2f5] dark:bg-[#111b21] border-b-[6px] border-green-500">
-        <div className="max-w-md text-center p-8">
-          <h2 className="text-3xl font-light text-[#41525d] dark:text-[#e9edef] mb-4">
-            Welcome to Chat App
-          </h2>
-          <p className="text-[#667781] dark:text-[#8696a0] text-sm leading-relaxed">
-            Select a conversation to start messaging your friends privately.
-          </p>
+export default function Home() {
+    const [status, setStatus] = useState<'loading' | 'online' | 'offline'>('loading');
+    const user = useAuthStore((state) => state.user);
+
+    useEffect(() => {
+        api.get('/health')
+            .then(() => setStatus('online'))
+            .catch(() => setStatus('offline'));
+    }, []);
+
+    return (
+        <div className="flex min-h-screen flex-col items-center justify-center bg-white dark:bg-black relative overflow-hidden">
+
+            {/* Background Grid Pattern */}
+            <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px]"></div>
+            <div className="absolute left-0 right-0 top-0 -z-10 m-auto h-[310px] w-[310px] rounded-full bg-primary/20 opacity-20 blur-[100px]"></div>
+
+            <div className="space-y-8 relative z-10 text-center max-w-2xl px-6">
+
+                {/* Status Badge */}
+                <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium border ${
+                    status === 'online' ? 'bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-900' :
+                        status === 'offline' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-zinc-100 text-zinc-500 border-zinc-200'
+                }`}>
+                    <span className={`h-2 w-2 rounded-full ${status === 'online' ? 'bg-green-500 animate-pulse' : 'bg-zinc-400'}`} />
+                    System Status: {status.charAt(0).toUpperCase() + status.slice(1)}
+                </div>
+
+                <div className="space-y-4">
+                    <h1 className="text-5xl md:text-7xl font-bold tracking-tighter text-black dark:text-white">
+                        Connect <span className="text-primary">Instantly</span>
+                    </h1>
+                    <p className="text-lg md:text-xl text-zinc-500 dark:text-zinc-400 max-w-lg mx-auto leading-relaxed">
+                        Secure, real-time messaging for the modern enterprise. Powered by Socket.io and Next.js.
+                    </p>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
+                    {user ? (
+                        <Link href="/chat">
+                            <Button size="lg" className="h-14 px-8 text-lg rounded-full shadow-lg hover:shadow-primary/25 transition-all">
+                                Open Dashboard
+                            </Button>
+                        </Link>
+                    ) : (
+                        <>
+                            <Link href="/login">
+                                <Button size="lg" className="h-14 px-8 rounded-full min-w-[140px]">
+                                    Login
+                                </Button>
+                            </Link>
+                            <Link href="/register">
+                                <Button variant="outline" size="lg" className="h-14 px-8 rounded-full min-w-[140px] bg-white/50 backdrop-blur-sm dark:bg-black/50">
+                                    Register
+                                </Button>
+                            </Link>
+                        </>
+                    )}
+                </div>
+
+                {/* Feature Pills */}
+                <div className="pt-12 flex flex-wrap justify-center gap-4 text-sm text-zinc-500 font-medium">
+                    <div className="flex items-center gap-2 bg-zinc-50 dark:bg-zinc-900/50 px-4 py-2 rounded-full border border-zinc-200 dark:border-zinc-800">
+                        <Zap className="w-4 h-4 text-yellow-500" /> Real-time
+                    </div>
+                    <div className="flex items-center gap-2 bg-zinc-50 dark:bg-zinc-900/50 px-4 py-2 rounded-full border border-zinc-200 dark:border-zinc-800">
+                        <ShieldCheck className="w-4 h-4 text-green-500" /> End-to-End Encrypted
+                    </div>
+                    <div className="flex items-center gap-2 bg-zinc-50 dark:bg-zinc-900/50 px-4 py-2 rounded-full border border-zinc-200 dark:border-zinc-800">
+                        <MessageSquare className="w-4 h-4 text-blue-500" /> Rich Media
+                    </div>
+                </div>
+            </div>
         </div>
-      </div>
-  );
-
-  return (
-      <div className="flex flex-col h-full w-full overflow-hidden relative bg-[#efeae2] dark:bg-[#0b141a]">
-        {/* Backdrop Pattern */}
-        <div className="absolute inset-0 opacity-[0.06] dark:opacity-[0.04] pointer-events-none bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')] z-0"></div>
-
-        <div className="flex-none z-10 w-full">
-          <ChatHeader user={activeUser} isTyping={isRemoteTyping} />
-        </div>
-
-        <div
-            ref={containerRef}
-            onScroll={handleScroll}
-            className="flex-1 overflow-y-auto relative z-0 custom-scrollbar overscroll-contain"
-        >
-          {isLoadingHistory ? (
-              <div className="flex flex-col items-center justify-center h-full space-y-4">
-                <Loader2 className="w-10 h-10 text-primary animate-spin opacity-50" />
-                <p className="text-xs text-zinc-500 font-medium tracking-widest uppercase">Fetching Conversation</p>
-              </div>
-          ) : (
-              <div className="p-4 md:px-8 md:py-6 space-y-1 pb-10">
-                {chatHistory.map((msg, i) => {
-                  const isFromMe = msg.authorId !== activeUser.id;
-                  const previousMsg = chatHistory[i - 1];
-                  const nextMsg = chatHistory[i + 1];
-
-                  const isFirstInGroup = !previousMsg || previousMsg.authorId !== msg.authorId ||
-                      getMessageDateLabel(msg.timestamp) !== getMessageDateLabel(previousMsg.timestamp);
-
-                  const isLastInGroup = !nextMsg || nextMsg.authorId !== msg.authorId;
-
-                  const showDateHeader = i === 0 ||
-                      getMessageDateLabel(msg.timestamp) !== getMessageDateLabel(chatHistory[i - 1].timestamp);
-
-                  return (
-                      <React.Fragment key={msg.id || i}>
-                        {showDateHeader && (
-                            <div className="flex justify-center my-6 sticky top-2 z-10">
-                                            <span className="text-[11px] font-bold text-[#54656f] dark:text-[#8696a0] bg-[#eef0f2] dark:bg-[#1f2c34] px-4 py-1.5 rounded-full shadow-sm border border-black/5 uppercase tracking-tighter">
-                                                {getMessageDateLabel(msg.timestamp)}
-                                            </span>
-                            </div>
-                        )}
-                        <MessageBubble
-                            message={msg}
-                            isFromMe={isFromMe}
-                            isFirstInGroup={isFirstInGroup}
-                            isLastInGroup={isLastInGroup}
-                            onReply={setReplyTo}
-                            onDelete={deleteMessage}
-                        />
-                      </React.Fragment>
-                  );
-                })}
-                <div ref={scrollRef} className="h-1" />
-              </div>
-          )}
-
-          {/* SCROLL BUTTON WITH COUNTER */}
-          {unreadBelowCount > 0 && (
-              <button
-                  onClick={() => scrollToBottom('smooth')}
-                  className="fixed bottom-28 right-6 md:right-10 z-[40] bg-white dark:bg-[#202c33] text-primary p-3 rounded-full shadow-2xl border border-zinc-200 dark:border-zinc-700 hover:scale-110 active:scale-95 transition-all animate-in slide-in-from-bottom-4 duration-300"
-              >
-                <ChevronDown className="w-6 h-6" />
-                <span className="absolute -top-2 -right-1 min-w-[22px] h-[22px] px-1 bg-red-500 text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-white dark:border-[#202c33] shadow-lg animate-bounce">
-                            {unreadBelowCount > 99 ? '99+' : unreadBelowCount}
-                        </span>
-              </button>
-          )}
-        </div>
-
-        <div className="flex-none z-20 w-full bg-[#f0f2f5] dark:bg-[#111b21]">
-          <ChatInput
-              value={message}
-              onChange={setMessage}
-              onSend={sendMessage}
-              onUploadMedia={sendMediaMessage}
-              recipientName={activeUser.username}
-              replyTo={replyTo}
-              onCancelReply={() => setReplyTo(null)}
-              isBlocked={isBlocked}
-          />
-        </div>
-      </div>
-  );
+    );
 }
