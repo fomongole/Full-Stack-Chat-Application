@@ -1,5 +1,4 @@
-# 🚀 Enterprise Chat Platform
-# 🚀 Enterprise Chat Platform
+# Enterprise Chat Platform
 
 ![Project Banner](https://github.com/user-attachments/assets/d8984424-a207-47a0-b6a8-48ae9a6afcc1)
 > A production-grade, full-stack real-time communication platform built with scalability, security, and modern UI/UX principles in mind.
