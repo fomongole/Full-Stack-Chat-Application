@@ -1,5 +1,6 @@
 'use client';
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { useChatStore } from '@/store/useChatStore';
 import { useConversation } from '@/hooks/chat/useConversation';
 import { User } from '@/types';
@@ -14,10 +15,54 @@ export default function ChatPage() {
     const {
         message, setMessage, chatHistory, isLoadingHistory, sendMessage,
         sendMediaMessage, deleteMessage, replyTo, setReplyTo,
-        isRemoteTyping, scrollRef, containerRef,
-        unreadBelowCount, scrollToBottom, handleScroll,
-        isBlocked, isLoadingMore
+        isRemoteTyping, containerRef,
+        unreadBelowCount, handleScroll,
+        isBlocked, isLoadingMore, isInitialLoad
     } = useConversation(activeUser);
+
+    // Virtualizer setup
+    const virtualizer = useVirtualizer({
+        count: chatHistory.length,
+        getScrollElement: () => containerRef.current,
+        estimateSize: () => 80, // Estimated message height
+        overscan: 5,
+        measureElement: typeof window !== 'undefined' && navigator.userAgent.indexOf('Firefox') === -1
+            ? (element) => element?.getBoundingClientRect().height
+            : undefined,
+    });
+
+    const items = virtualizer.getVirtualItems();
+
+    // Auto-scroll to bottom on initial load
+    useEffect(() => {
+        if (!isLoadingHistory && chatHistory.length > 0 && isInitialLoad.current && containerRef.current) {
+            // Scroll to bottom on initial load
+            const timer = setTimeout(() => {
+                if (containerRef.current) {
+                    containerRef.current.scrollTop = containerRef.current.scrollHeight;
+                }
+                isInitialLoad.current = false;
+            }, 100);
+            return () => clearTimeout(timer);
+        }
+    }, [isLoadingHistory, chatHistory.length]);
+
+    // Auto-scroll when user sends a message
+    const lastMessageAuthor = chatHistory[chatHistory.length - 1]?.authorId;
+    const currentUserId = useChatStore((state) => state.activeUser)?.id;
+
+    useEffect(() => {
+        if (!isInitialLoad.current && lastMessageAuthor === currentUserId && containerRef.current) {
+            // User sent a message, scroll to bottom
+            containerRef.current.scrollTop = containerRef.current.scrollHeight;
+        }
+    }, [chatHistory.length, lastMessageAuthor, currentUserId]);
+
+    const scrollToBottom = () => {
+        if (containerRef.current) {
+            containerRef.current.scrollTop = containerRef.current.scrollHeight;
+        }
+    };
 
     if (!activeUser) return (
         <div className="flex-1 flex flex-col items-center justify-center h-full bg-[#f0f2f5] dark:bg-[#111b21] border-b-[6px] border-green-500">
@@ -43,7 +88,7 @@ export default function ChatPage() {
             <div
                 ref={containerRef}
                 onScroll={handleScroll}
-                className="flex-1 overflow-y-auto relative z-0 custom-scrollbar overscroll-contain scroll-smooth"
+                className="flex-1 overflow-y-auto relative z-0 custom-scrollbar overscroll-contain"
             >
                 {isLoadingHistory ? (
                     <div className="flex flex-col items-center justify-center h-full space-y-4">
@@ -51,32 +96,50 @@ export default function ChatPage() {
                         <p className="text-xs text-zinc-500 font-medium">Loading messages...</p>
                     </div>
                 ) : (
-                    <div className="p-4 md:px-8 md:py-4 space-y-1 pb-4">
-
-                        {/* PAGINATION LOADER: Shows when user scrolls to top to load more */}
+                    <div
+                        style={{
+                            height: `${virtualizer.getTotalSize()}px`,
+                            width: '100%',
+                            position: 'relative',
+                        }}
+                        className="p-4 md:px-8 md:py-4"
+                    >
+                        {/* Pagination loader */}
                         {isLoadingMore && (
                             <div className="flex justify-center py-4">
                                 <Loader2 className="w-6 h-6 text-primary animate-spin opacity-60" />
                             </div>
                         )}
 
-                        {chatHistory.map((msg, i) => {
+                        {items.map((virtualRow) => {
+                            const msg = chatHistory[virtualRow.index];
+                            const previousMsg = chatHistory[virtualRow.index - 1];
+                            const nextMsg = chatHistory[virtualRow.index + 1];
                             const isFromMe = msg.username !== activeUser.username;
-                            const previousMsg = chatHistory[i - 1];
-                            const nextMsg = chatHistory[i + 1];
 
                             const isFirstInGroup = !previousMsg || previousMsg.username !== msg.username ||
                                 getMessageDateLabel(msg.timestamp) !== getMessageDateLabel(previousMsg.timestamp);
 
                             const isLastInGroup = !nextMsg || nextMsg.username !== msg.username;
 
-                            const showDateHeader = i === 0 ||
-                                getMessageDateLabel(msg.timestamp) !== getMessageDateLabel(chatHistory[i - 1].timestamp);
+                            const showDateHeader = virtualRow.index === 0 ||
+                                getMessageDateLabel(msg.timestamp) !== getMessageDateLabel(chatHistory[virtualRow.index - 1].timestamp);
 
                             return (
-                                <React.Fragment key={msg.id || i}>
+                                <div
+                                    key={virtualRow.key}
+                                    data-index={virtualRow.index}
+                                    ref={virtualizer.measureElement}
+                                    style={{
+                                        position: 'absolute',
+                                        top: 0,
+                                        left: 0,
+                                        width: '100%',
+                                        transform: `translateY(${virtualRow.start}px)`,
+                                    }}
+                                >
                                     {showDateHeader && (
-                                        <div className="flex justify-center my-6 sticky top-2 z-10">
+                                        <div className="flex justify-center my-6">
                                             <span className="text-[11px] font-medium text-[#54656f] dark:text-[#8696a0] bg-[#eef0f2] dark:bg-[#1f2c34] px-3 py-1.5 rounded-lg shadow-sm border border-black/5">
                                                 {getMessageDateLabel(msg.timestamp)}
                                             </span>
@@ -90,22 +153,19 @@ export default function ChatPage() {
                                         onReply={setReplyTo}
                                         onDelete={deleteMessage}
                                     />
-                                </React.Fragment>
+                                </div>
                             );
                         })}
-                        <div ref={scrollRef} className="h-1" />
                     </div>
                 )}
 
-                {/* UPDATED: FLOATING SCROLL BUTTON WITH COUNTER */}
+                {/* Scroll to bottom button */}
                 {unreadBelowCount > 0 && (
                     <button
-                        onClick={() => scrollToBottom('smooth')}
+                        onClick={scrollToBottom}
                         className="fixed bottom-24 right-6 md:right-10 z-[40] bg-white dark:bg-[#202c33] text-primary p-3 rounded-full shadow-2xl border border-zinc-200 dark:border-zinc-700 hover:scale-110 active:scale-95 transition-all animate-in slide-in-from-bottom-4 fade-in duration-300 group"
                     >
                         <ChevronDown className="w-6 h-6" />
-
-                        {/* Red Badge for Counter */}
                         <span className="absolute -top-2 -right-1 min-w-[22px] h-[22px] px-1 bg-red-500 text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-white dark:border-[#202c33] shadow-sm animate-in zoom-in duration-300">
                             {unreadBelowCount > 99 ? '99+' : unreadBelowCount}
                         </span>
