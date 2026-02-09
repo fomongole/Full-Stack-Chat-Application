@@ -19,8 +19,8 @@ interface MessageListProps {
 }
 
 /**
- * MessageList with fixed Scroll Anchoring.
- * Prevents jumping when loading older messages.
+ * Specialized MessageList component.
+ * Fixed: Implements "Scroll Anchoring" to prevent jumping when loading older messages.
  */
 export const MessageList: React.FC<MessageListProps> = ({
                                                             chatHistory,
@@ -33,26 +33,24 @@ export const MessageList: React.FC<MessageListProps> = ({
                                                             onScroll,
                                                             onInitialScrollComplete,
                                                         }) => {
-    // Track previous height to calculate scroll diff
+    // Refs for Scroll Anchoring
     const prevScrollHeightRef = useRef<number>(0);
-    const prevFirstMessageIdRef = useRef<string | null>(null);
     const hasInitiallyScrolledRef = useRef(false);
 
     // Virtualizer setup
     const virtualizer = useVirtualizer({
         count: chatHistory.length,
         getScrollElement: () => containerRef.current,
-        estimateSize: () => 100, // Estimate row height
-        overscan: 10, // Increase overscan to prevent blank spaces during fast scroll
+        estimateSize: () => 100, // Approximate height of a message
+        overscan: 10, // Render more items outside view to prevent white flashes
     });
 
     const items = virtualizer.getVirtualItems();
 
     /**
-     * SCROLL ANCHORING LOGIC (The Fix for the "Buggy Jump")
-     * 1. Before render, we simply let React update.
-     * 2. After render but BEFORE paint (useLayoutEffect), we check if height changed.
-     * 3. If we loaded *older* messages (prepended), we adjust scrollTop.
+     * FIX: Scroll Anchoring Logic
+     * Runs synchronously after DOM update but BEFORE paint.
+     * Calculates how much the list grew and adjusts scroll position.
      */
     useLayoutEffect(() => {
         const container = containerRef.current;
@@ -60,51 +58,41 @@ export const MessageList: React.FC<MessageListProps> = ({
 
         const currentScrollHeight = container.scrollHeight;
         const prevScrollHeight = prevScrollHeightRef.current;
-        const count = chatHistory.length;
 
-        // Check if we prepended messages (list grew, and the first message ID changed)
-        // We only adjust scroll if we are NOT at the very bottom (initial load handled elsewhere)
+        // If we have history, aren't loading, and the height grew (meaning items were added to top)
         if (
             prevScrollHeight > 0 &&
             currentScrollHeight > prevScrollHeight &&
-            isLoadingMore === false // Only adjust when loading is done
+            !isLoadingMore &&
+            !isLoadingHistory
         ) {
-            // Calculate how much the list grew upwards
+            // The magic formula: New Position = Old Position + (New Height - Old Height)
             const heightDifference = currentScrollHeight - prevScrollHeight;
-
-            // Adjust scroll position immediately to keep viewport stable
             container.scrollTop = container.scrollTop + heightDifference;
-
-            // Debug log if needed
-            // console.log(`Anchored Scroll: Adjusted by ${heightDifference}px`);
         }
 
-        // Update refs for next render
+        // Save current height for next render
         prevScrollHeightRef.current = currentScrollHeight;
-        prevFirstMessageIdRef.current = chatHistory[0]?.id || null;
-
-    }, [chatHistory, isLoadingMore, containerRef]);
-
+    }, [chatHistory, isLoadingMore, isLoadingHistory, containerRef]);
 
     /**
-     * INITIAL SCROLL LOGIC
-     * Forces scroll to bottom on first load.
+     * Initial Load: Scroll to bottom
      */
     useEffect(() => {
-        if (!isLoadingHistory && chatHistory.length > 0 && !hasInitiallyScrolledRef.current) {
-            const container = containerRef.current;
-            if (container) {
-                container.scrollTop = container.scrollHeight;
-                hasInitiallyScrolledRef.current = true;
-                onInitialScrollComplete?.();
-            }
+        if (
+            !hasInitiallyScrolledRef.current &&
+            !isLoadingHistory &&
+            chatHistory.length > 0 &&
+            containerRef.current
+        ) {
+            containerRef.current.scrollTop = containerRef.current.scrollHeight;
+            hasInitiallyScrolledRef.current = true;
+            onInitialScrollComplete?.();
         }
     }, [isLoadingHistory, chatHistory.length, containerRef, onInitialScrollComplete]);
 
-
     /**
-     * AUTO-SCROLL FOR NEW MESSAGES (Stick to Bottom)
-     * If user is near bottom and new message comes in -> scroll down.
+     * Auto-scroll for NEW messages (Stick to bottom)
      */
     useEffect(() => {
         if (!hasInitiallyScrolledRef.current || chatHistory.length === 0) return;
@@ -115,19 +103,23 @@ export const MessageList: React.FC<MessageListProps> = ({
         const lastMessage = chatHistory[chatHistory.length - 1];
         const isMyMessage = lastMessage.authorId === currentUserId;
 
-        // Check if user is near bottom (within 300px)
+        // Check if user is near bottom
         const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
         const isNearBottom = distanceToBottom < 300;
 
-        // If I sent the message OR I'm already at the bottom, auto-scroll
+        // Only auto-scroll if I sent it OR if I'm already at the bottom
         if (isMyMessage || isNearBottom) {
-            // Use minimal timeout to allow virtualizer to compute size
+            // Small timeout to allow virtualizer to calculate exact size
             setTimeout(() => {
-                container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+                if (containerRef.current) {
+                    containerRef.current.scrollTo({
+                        top: containerRef.current.scrollHeight,
+                        behavior: 'smooth'
+                    });
+                }
             }, 50);
         }
     }, [chatHistory.length, currentUserId, containerRef]);
-
 
     if (isLoadingHistory) {
         return (
@@ -146,12 +138,12 @@ export const MessageList: React.FC<MessageListProps> = ({
                 position: 'relative',
             }}
         >
-            {/* Loading More Indicator - Positioned nicely within the flow */}
+            {/* Loading Spinner for Pagination */}
             {isLoadingMore && (
-                <div className="absolute top-[-40px] left-0 right-0 h-[40px] flex items-center justify-center">
-                    <div className="bg-white/80 dark:bg-[#111b21]/80 px-3 py-1 rounded-full shadow-sm flex items-center gap-2 backdrop-blur-sm z-20">
-                        <Loader2 className="w-4 h-4 text-primary animate-spin" />
-                        <span className="text-[10px] text-zinc-500 font-medium">Loading history...</span>
+                <div className="absolute top-[-30px] left-0 right-0 h-[30px] flex justify-center z-10">
+                    <div className="bg-white/80 dark:bg-[#111b21]/80 px-3 py-1 rounded-full shadow-sm backdrop-blur-sm flex items-center gap-2">
+                        <Loader2 className="w-3 h-3 text-primary animate-spin" />
+                        <span className="text-[10px] text-zinc-500">Loading history...</span>
                     </div>
                 </div>
             )}
@@ -194,8 +186,8 @@ export const MessageList: React.FC<MessageListProps> = ({
                         className="px-4 pb-1"
                     >
                         {showDateHeader && (
-                            <div className="flex justify-center my-4 sticky top-2 z-10">
-                                <span className="text-[11px] font-medium text-[#54656f] dark:text-[#8696a0] bg-[#eef0f2] dark:bg-[#1f2c34] px-3 py-1.5 rounded-lg shadow-sm border border-black/5 opacity-90">
+                            <div className="flex justify-center my-4 sticky top-2 z-10 opacity-90">
+                                <span className="text-[11px] font-medium text-[#54656f] dark:text-[#8696a0] bg-[#eef0f2] dark:bg-[#1f2c34] px-3 py-1.5 rounded-lg shadow-sm border border-black/5">
                                     {getMessageDateLabel(msg.timestamp)}
                                 </span>
                             </div>

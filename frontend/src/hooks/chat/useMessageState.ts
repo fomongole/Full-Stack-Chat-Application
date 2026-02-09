@@ -1,25 +1,22 @@
+'use client';
 import { useState, useCallback, useEffect } from 'react';
 import { Message } from '@/types';
 
 /**
  * Pure message state management hook.
- * No socket logic, no scroll logic - just state.
+ * Fixed: Removed cascading render loops and simplified state resets.
  */
 export const useMessageState = (activeUserId: string | null) => {
-    // Note: We rely on the parent component to remount this hook
-    // (via key={activeUserId}) when the user changes to reset state.
+    // Note: We rely on the parent component (ChatPage) to use key={activeUserId}
+    // to reset this hook's state when the user changes.
     const [chatHistory, setChatHistory] = useState<(Message & { isLocal?: boolean })[]>([]);
-    const [isLoadingHistory, setIsLoadingHistory] = useState(true); // Default to true on mount
+    const [isLoadingHistory, setIsLoadingHistory] = useState(true);
     const [hasMore, setHasMore] = useState(false);
     const [isLoadingMore, setIsLoadingMore] = useState(false);
     const [conversationId, setConversationId] = useState<string | null>(null);
     const [isRemoteTyping, setIsRemoteTyping] = useState(false);
 
-    // State update handlers
-    const handleConversationJoined = useCallback((data: { conversationId: string }) => {
-        setConversationId(data.conversationId);
-    }, []);
-
+    // Initial load handler
     const handleHistoryLoaded = useCallback(
         (data: { messages: Message[]; hasMore: boolean }) => {
             setChatHistory(data.messages);
@@ -30,19 +27,28 @@ export const useMessageState = (activeUserId: string | null) => {
         []
     );
 
+    // Pagination handler (Prepends messages)
     const handleMoreMessagesLoaded = useCallback(
         (data: { messages: Message[]; hasMore: boolean }) => {
-            // We prepend messages here
-            setChatHistory((prev) => [...data.messages, ...prev]);
+            if (data.messages.length > 0) {
+                setChatHistory((prev) => [...data.messages, ...prev]);
+            }
             setHasMore(data.hasMore);
             setIsLoadingMore(false);
         },
         []
     );
 
+    // Real-time message handler
     const handleMessageReceived = useCallback((newMessage: Message) => {
         setChatHistory((prev) => {
-            // Remove optimistic message if exists
+            // 1. Check if we already have this ID (deduplication)
+            if (prev.some((m) => m.id === newMessage.id)) {
+                return prev;
+            }
+
+            // 2. Remove optimistic/temporary version if exists
+            // (Matches by local ID or attachment URL)
             const filtered = prev.filter(
                 (m) =>
                     !m.isLocal ||
@@ -50,8 +56,7 @@ export const useMessageState = (activeUserId: string | null) => {
                         m.attachmentUrl !== newMessage.attachmentUrl &&
                         m.id !== newMessage.id)
             );
-            // Prevent duplicates
-            if (filtered.some((m) => m.id === newMessage.id)) return filtered;
+
             return [...filtered, newMessage];
         });
     }, []);
@@ -106,6 +111,10 @@ export const useMessageState = (activeUserId: string | null) => {
 
     const startLoadingMore = useCallback(() => {
         setIsLoadingMore(true);
+    }, []);
+
+    const handleConversationJoined = useCallback((data: { conversationId: string }) => {
+        setConversationId(data.conversationId);
     }, []);
 
     return {

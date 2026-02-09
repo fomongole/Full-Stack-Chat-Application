@@ -1,3 +1,4 @@
+'use client';
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Message } from '@/types';
 
@@ -14,7 +15,7 @@ interface UseScrollBehaviorProps {
 
 /**
  * Scroll behavior and unread message tracking.
- * Handles pagination triggers and unread counts without cascading renders.
+ * Fixed: ESLint "Cannot access refs during render" error.
  */
 export const useScrollBehavior = ({
                                       chatHistory,
@@ -29,48 +30,56 @@ export const useScrollBehavior = ({
     const [unreadBelowCount, setUnreadBelowCount] = useState(0);
     const containerRef = useRef<HTMLDivElement>(null);
 
-    // We use a ref to track the latest message ID to detect NEW incoming messages
-    // vs simply re-rendering existing ones.
+    // Track the last message ID we processed to prevent recount loops
     const lastProcessedMessageId = useRef<string | null>(null);
 
+    // Track previous active user for Derived State
+    const [prevActiveUserId, setPrevActiveUserId] = useState(activeUserId);
+
+    // 1. DERIVED STATE: Reset unread count instantly
+    // Allowed: State updates during render (stops double-paint)
+    if (activeUserId !== prevActiveUserId) {
+        setPrevActiveUserId(activeUserId);
+        setUnreadBelowCount(0);
+    }
+
+    // 2. EFFECT: Reset the Ref (Side Effect)
+    // Required: Ref updates must happen inside useEffect, not render
+    useEffect(() => {
+        lastProcessedMessageId.current = null;
+    }, [activeUserId]);
+
     /**
-     * Effect: Track incoming messages for unread counting
-     * Optimized to avoid set-state loops.
+     * Effect: Track new incoming messages for unread count
      */
     useEffect(() => {
         if (chatHistory.length === 0) return;
 
         const lastMessage = chatHistory[chatHistory.length - 1];
 
-        // If this is the same message we already processed, ignore.
+        // Prevent re-running for the same message
         if (lastProcessedMessageId.current === lastMessage.id) return;
         lastProcessedMessageId.current = lastMessage.id;
 
         const container = containerRef.current;
+        if (!container) return;
 
-        // Only count messages from others
-        if (lastMessage.authorId !== currentUserId && container) {
+        // If I am NOT the author, and I am NOT at the bottom, increment unread
+        if (lastMessage.authorId !== currentUserId) {
             const { scrollTop, scrollHeight, clientHeight } = container;
-            // 200px threshold for being "at bottom"
             const isNearBottom = scrollHeight - scrollTop - clientHeight < 200;
 
             if (!isNearBottom) {
-                setUnreadBelowCount((prev) => prev + 1);
+                // Wrap in setTimeout to avoid "setState during render" warning from parent updates
+                setTimeout(() => {
+                    setUnreadBelowCount((prev) => prev + 1);
+                }, 0);
             }
         }
     }, [chatHistory, currentUserId]);
 
     /**
-     * Reset unread count when active user changes
-     * Relies on parent key-remount or this effect.
-     */
-    useEffect(() => {
-        setUnreadBelowCount(0);
-        lastProcessedMessageId.current = null;
-    }, [activeUserId]);
-
-    /**
-     * Handle scroll events
+     * Scroll Event Handler
      */
     const handleScroll = useCallback(() => {
         const container = containerRef.current;
@@ -78,8 +87,7 @@ export const useScrollBehavior = ({
 
         const { scrollTop, scrollHeight, clientHeight } = container;
 
-        // 1. Pagination Trigger: Scrolled near top (scrollTop < 100)
-        // We add a check for scrollTop > 0 to prevent triggering when the list is just too short
+        // 1. Pagination: User scrolled to top
         if (
             scrollTop < 250 &&
             scrollTop >= 0 &&
@@ -91,14 +99,13 @@ export const useScrollBehavior = ({
             loadMoreMessages(conversationId, oldestMessageId);
         }
 
-        // 2. Unread Count & Read Status: Scrolled near bottom
-        const isNearBottom = scrollHeight - scrollTop - clientHeight < 200;
+        // 2. Unread Count: User scrolled to bottom
+        const isNearBottom = scrollHeight - scrollTop - clientHeight < 150;
         if (isNearBottom) {
             if (unreadBelowCount > 0) {
                 setUnreadBelowCount(0);
             }
-
-            // Mark messages as read if valid
+            // Mark as read if visible
             if (document.visibilityState === 'visible') {
                 markAsRead(conversationId, activeUserId);
             }
@@ -111,7 +118,7 @@ export const useScrollBehavior = ({
         conversationId,
         activeUserId,
         markAsRead,
-        unreadBelowCount // Added dependency to safely clear count
+        unreadBelowCount
     ]);
 
     const scrollToBottom = useCallback(() => {
@@ -126,7 +133,6 @@ export const useScrollBehavior = ({
 
     const scrollToBottomInstant = useCallback(() => {
         if (containerRef.current) {
-            // Force layout calculation
             containerRef.current.scrollTop = containerRef.current.scrollHeight;
         }
     }, []);
