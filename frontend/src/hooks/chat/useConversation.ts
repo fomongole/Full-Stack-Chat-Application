@@ -1,4 +1,4 @@
-import {useState, useEffect, useRef, useCallback} from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSocket } from '@/hooks/useSocket';
 import { useAuthStore } from '@/store/useAuthStore';
 import { User, Message } from '@/types';
@@ -14,18 +14,13 @@ export const useConversation = (activeUser: User | null) => {
     const [conversationId, setConversationId] = useState<string | null>(null);
     const [replyTo, setReplyTo] = useState<Message | null>(null);
     const [isRemoteTyping, setIsRemoteTyping] = useState(false);
-    const [unreadBelowCount, setUnreadBelowCount] = useState(0);
 
-    const containerRef = useRef<HTMLDivElement>(null);
+    // Refs for internal logic (debouncing, deduping)
     const isInitialLoad = useRef(true);
-    const countedMessageIds = useRef<Set<string>>(new Set());
-
     const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const lastTypingEmitRef = useRef<number>(0);
     const activeUserRef = useRef(activeUser);
     const conversationIdRef = useRef(conversationId);
-    const oldScrollHeightRef = useRef(0);
-    const preserveScrollPositionRef = useRef(false);
 
     useEffect(() => { activeUserRef.current = activeUser; }, [activeUser]);
     useEffect(() => { conversationIdRef.current = conversationId; }, [conversationId]);
@@ -34,76 +29,32 @@ export const useConversation = (activeUser: User | null) => {
     const currentUser = useAuthStore((state) => state.user);
     const isBlocked = activeUser?.hasBlocked || activeUser?.isBlockedBy;
 
+    // 1. Reset state when switching users
+    useEffect(() => {
+        if (activeUser?.id) {
+            isInitialLoad.current = true;
+            setHasMore(false);
+            setChatHistory([]);
+            setMessage('');
+            setReplyTo(null);
+        }
+    }, [activeUser?.id]);
+
+    // 2. Load More Action (Exposed to UI)
     const loadMoreMessages = useCallback(() => {
         if (!socket || !conversationId || !hasMore || isLoadingMore || chatHistory.length === 0) return;
-
-        // Store current scroll position before loading more
-        const container = containerRef.current;
-        if (container) {
-            preserveScrollPositionRef.current = true;
-            oldScrollHeightRef.current = container.scrollHeight;
-        }
 
         setIsLoadingMore(true);
         const oldestMessageId = chatHistory[0].id;
         socket.emit("load_more_messages", { conversationId, cursor: oldestMessageId });
     }, [socket, conversationId, hasMore, isLoadingMore, chatHistory]);
 
-    const handleScroll = useCallback(() => {
-        const container = containerRef.current;
-        if (!container) return;
-
-        // Pagination trigger - only load more if we're at the top
-        const scrollTop = container.scrollTop;
-        const scrollHeight = container.scrollHeight;
-        const clientHeight = container.clientHeight;
-
-        if (scrollTop < 100 && hasMore && !isLoadingMore && chatHistory.length > 0) {
-            loadMoreMessages();
-        }
-
-        // Unread counter - clear when near bottom
-        const isNearBottom = scrollHeight - scrollTop - clientHeight < 200;
-        if (isNearBottom) {
-            setUnreadBelowCount(0);
-            countedMessageIds.current.clear();
-        }
-    }, [hasMore, isLoadingMore, loadMoreMessages, chatHistory.length]);
-
-    useEffect(() => {
-        if (activeUser?.id) {
-            isInitialLoad.current = true;
-            setUnreadBelowCount(0);
-            countedMessageIds.current.clear();
-            setHasMore(false);
-            setChatHistory([]);
-            preserveScrollPositionRef.current = false;
-        }
-    }, [activeUser?.id]);
-
-    // Adjust scroll position after loading more messages
-    useEffect(() => {
-        if (preserveScrollPositionRef.current && containerRef.current && !isLoadingMore) {
-            const container = containerRef.current;
-            const newScrollHeight = container.scrollHeight;
-            const scrollDifference = newScrollHeight - oldScrollHeightRef.current;
-
-            if (scrollDifference > 0) {
-                container.scrollTop += scrollDifference;
-            }
-
-            preserveScrollPositionRef.current = false;
-            oldScrollHeightRef.current = 0;
-        }
-    }, [isLoadingMore, chatHistory]);
-
-    // Socket listeners
+    // 3. Socket Event Listeners
     useEffect(() => {
         if (!socket || !activeUser?.id) return;
 
         setIsLoadingHistory(true);
-        setChatHistory([]);
-        isInitialLoad.current = true;
+        setChatHistory([]); // Clear previous chat immediately on switch
 
         socket.emit("join_conversation", { recipientId: activeUser.id });
 
@@ -119,9 +70,11 @@ export const useConversation = (activeUser: User | null) => {
             setChatHistory(data.messages);
             setHasMore(data.hasMore);
             setIsLoadingHistory(false);
+            isInitialLoad.current = false;
         };
 
         const handleMoreMessagesLoaded = (data: { messages: Message[], hasMore: boolean }) => {
+            // Prepend new messages to the top
             setChatHistory(prev => [...data.messages, ...prev]);
             setHasMore(data.hasMore);
             setIsLoadingMore(false);
@@ -129,36 +82,25 @@ export const useConversation = (activeUser: User | null) => {
 
         const handleReceiveMessage = (newMessage: Message) => {
             setChatHistory((prev) => {
+                // Remove local optimistic version if it exists
                 const filtered = prev.filter(m =>
                     !m.isLocal ||
                     (m.isLocal && m.attachmentUrl !== newMessage.attachmentUrl && m.id !== newMessage.id)
                 );
+                // Deduplicate
                 if (filtered.some(m => m.id === newMessage.id)) return filtered;
                 return [...filtered, newMessage];
             });
 
-            const container = containerRef.current;
-            const isFromOther = newMessage.authorId !== currentUser?.id;
-
-            if (container && isFromOther) {
-                const scrollTop = container.scrollTop;
-                const scrollHeight = container.scrollHeight;
-                const clientHeight = container.clientHeight;
-                const isNearBottom = scrollHeight - scrollTop - clientHeight < 300;
-
-                if (!isNearBottom && !countedMessageIds.current.has(newMessage.id)) {
-                    setUnreadBelowCount(prev => prev + 1);
-                    countedMessageIds.current.add(newMessage.id);
+            if (newMessage.authorId === activeUserRef.current?.id) {
+                setIsRemoteTyping(false);
+                // Mark read if window is focused
+                if (document.visibilityState === 'visible') {
+                    socket.emit("mark_as_read", {
+                        conversationId: newMessage.conversationId,
+                        recipientId: activeUserRef.current?.id
+                    });
                 }
-            }
-
-            if (newMessage.authorId === activeUserRef.current?.id) setIsRemoteTyping(false);
-
-            if (document.visibilityState === 'visible' && newMessage.conversationId === conversationIdRef.current) {
-                socket.emit("mark_as_read", {
-                    conversationId: newMessage.conversationId,
-                    recipientId: activeUserRef.current?.id
-                });
             }
         };
 
@@ -313,17 +255,7 @@ export const useConversation = (activeUser: User | null) => {
         }, 3000);
     }, [socket, conversationId, activeUser, currentUser, isBlocked]);
 
-    const scrollToBottom = useCallback(() => {
-        if (containerRef.current) {
-            containerRef.current.scrollTo({
-                top: containerRef.current.scrollHeight,
-                behavior: 'smooth'
-            });
-            setUnreadBelowCount(0);
-            countedMessageIds.current.clear();
-        }
-    }, []);
-
+    // Note: No scrollToBottom or containerRef here!
     return {
         message,
         setMessage: handleTyping,
@@ -335,13 +267,9 @@ export const useConversation = (activeUser: User | null) => {
         replyTo,
         setReplyTo,
         isRemoteTyping,
-        containerRef,
-        unreadBelowCount,
-        handleScroll,
         isBlocked,
         isLoadingMore,
-        isInitialLoad,
-        scrollToBottom,
-        conversationId
+        conversationId,
+        loadMoreMessages // We export this so the UI can call it
     };
 };

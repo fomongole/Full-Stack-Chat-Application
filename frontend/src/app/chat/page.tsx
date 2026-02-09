@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState, useLayoutEffect } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useChatStore } from '@/store/useChatStore';
 import { useConversation } from '@/hooks/chat/useConversation';
@@ -15,87 +15,114 @@ export default function ChatPage() {
     const activeUser = useChatStore((state) => state.activeUser) as User | null;
     const currentUser = useAuthStore((state) => state.user);
 
+    // Get clean data from hook (no scroll logic involved there)
     const {
         message, setMessage, chatHistory, isLoadingHistory, sendMessage,
         sendMediaMessage, deleteMessage, replyTo, setReplyTo,
-        isRemoteTyping, containerRef,
-        unreadBelowCount, handleScroll,
-        isBlocked, isLoadingMore, isInitialLoad,
-        scrollToBottom, conversationId
+        isRemoteTyping, isBlocked, isLoadingMore,
+        loadMoreMessages
     } = useConversation(activeUser);
 
-    const [shouldScrollToBottom, setShouldScrollToBottom] = useState(false);
-    const lastChatHistoryLengthRef = useRef(0);
-    const isFirstLoadRef = useRef(true);
+    const containerRef = useRef<HTMLDivElement>(null);
+    const [unreadBelowCount, setUnreadBelowCount] = useState(0);
+    const [showScrollBottom, setShowScrollBottom] = useState(false);
 
-    // Simplified virtualizer - remove for small chats if problematic
+    // --- SCROLL MANAGEMENT REFS ---
+    const prevHistoryLengthRef = useRef(0);
+    const prevFirstMessageIdRef = useRef<string | null>(null);
+    const prevScrollHeightRef = useRef(0);
+    const isUserScrolledUpRef = useRef(false);
+
+    // Virtualizer setup
     const virtualizer = useVirtualizer({
         count: chatHistory.length,
         getScrollElement: () => containerRef.current,
-        estimateSize: () => 100,
+        estimateSize: () => 80, // Approximate height of a message
         overscan: 5,
-        scrollMargin: 50,
     });
 
     const items = virtualizer.getVirtualItems();
 
-    // Initial load scroll to bottom
-    useEffect(() => {
-        if (isInitialLoad.current && !isLoadingHistory && chatHistory.length > 0) {
-            isInitialLoad.current = false;
+    // --- THE FIX: useLayoutEffect for invisible scroll adjustment ---
+    useLayoutEffect(() => {
+        const container = containerRef.current;
+        if (!container || isLoadingHistory) return;
 
-            // Small delay to ensure DOM is ready
-            setTimeout(() => {
-                if (containerRef.current) {
-                    containerRef.current.scrollTop = containerRef.current.scrollHeight;
-                }
-            }, 100);
+        const currentLength = chatHistory.length;
+        const prevLength = prevHistoryLengthRef.current;
+        const currentFirstMsgId = chatHistory[0]?.id;
+
+        // SCENARIO 1: Initial Load (0 -> N messages)
+        if (prevLength === 0 && currentLength > 0) {
+            // Instantly jump to bottom. No animation.
+            container.scrollTop = container.scrollHeight;
         }
-    }, [isLoadingHistory, chatHistory.length]);
 
-    // Auto-scroll for new messages
-    useEffect(() => {
-        if (!isFirstLoadRef.current && containerRef.current && chatHistory.length > 0) {
-            const container = containerRef.current;
-            const lastMessage = chatHistory[chatHistory.length - 1];
-            const isMyMessage = lastMessage.authorId === currentUser?.id;
+            // SCENARIO 2: Pagination (Loading old messages at top)
+        // We detect this because the first message ID has changed and length increased
+        else if (currentLength > prevLength && currentFirstMsgId !== prevFirstMessageIdRef.current) {
+            // The browser keeps scrollTop at the same pixel value (e.g., 50px).
+            // But we inserted content above. We must push scrollTop down by the height of inserted content.
+            const newScrollHeight = container.scrollHeight;
+            const heightAdded = newScrollHeight - prevScrollHeightRef.current;
 
-            // Check if we're near the bottom
-            const scrollBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-            const isNearBottom = scrollBottom < 300;
+            // Adjust instantly
+            container.scrollTop = container.scrollTop + heightAdded;
+        }
 
-            // Scroll if it's my message OR if we're already near bottom
-            if (isMyMessage || isNearBottom) {
-                setTimeout(() => {
-                    if (containerRef.current) {
-                        containerRef.current.scrollTop = containerRef.current.scrollHeight;
-                    }
-                }, 50);
+        // SCENARIO 3: New Message Arrived (at bottom)
+        else if (currentLength > prevLength) {
+            const lastMessage = chatHistory[currentLength - 1];
+            const isFromMe = lastMessage.authorId === currentUser?.id;
+
+            // If I sent it, or if I was already at the bottom, auto-scroll smoothly
+            if (isFromMe || !isUserScrolledUpRef.current) {
+                container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+            } else {
+                // I am reading old history, don't interrupt me. Just show badge.
+                setUnreadBelowCount(prev => prev + 1);
             }
         }
 
-        if (chatHistory.length > 0) {
-            isFirstLoadRef.current = false;
+        // Update refs for next render
+        prevHistoryLengthRef.current = currentLength;
+        prevFirstMessageIdRef.current = currentFirstMsgId;
+        prevScrollHeightRef.current = container.scrollHeight;
+
+    }, [chatHistory, isLoadingHistory, currentUser?.id]);
+
+    // --- SCROLL EVENT LISTENER ---
+    const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+        const target = e.currentTarget;
+        const { scrollTop, scrollHeight, clientHeight } = target;
+
+        // Update scroll height ref for pagination calc
+        prevScrollHeightRef.current = scrollHeight;
+
+        // Logic to toggle "Scroll to Bottom" button
+        const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+        const isScrolledUp = distanceFromBottom > 150; // Tolerance threshold
+
+        isUserScrolledUpRef.current = isScrolledUp;
+        setShowScrollBottom(isScrolledUp);
+
+        // Reset unread count if we are at bottom
+        if (!isScrolledUp) {
+            setUnreadBelowCount(0);
         }
 
-        lastChatHistoryLengthRef.current = chatHistory.length;
-    }, [chatHistory, currentUser?.id]);
-
-    // Handle when user is near bottom and new message arrives
-    useEffect(() => {
-        if (containerRef.current && chatHistory.length > lastChatHistoryLengthRef.current) {
-            const container = containerRef.current;
-            const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 400;
-
-            if (isNearBottom) {
-                setTimeout(() => {
-                    if (containerRef.current) {
-                        containerRef.current.scrollTop = containerRef.current.scrollHeight;
-                    }
-                }, 100);
-            }
+        // Trigger Pagination: If near top (pixels) and we have more data
+        if (scrollTop < 50 && !isLoadingMore && chatHistory.length > 0) {
+            loadMoreMessages(); // Call the hook function
         }
-    }, [chatHistory.length]);
+    };
+
+    const scrollToBottomManual = () => {
+        if (containerRef.current) {
+            containerRef.current.scrollTo({ top: containerRef.current.scrollHeight, behavior: 'smooth' });
+            setUnreadBelowCount(0);
+        }
+    };
 
     if (!activeUser) return (
         <div className="flex-1 flex flex-col items-center justify-center h-full bg-[#f0f2f5] dark:bg-[#111b21] border-b-[6px] border-green-500">
@@ -112,6 +139,7 @@ export default function ChatPage() {
 
     return (
         <div className="flex flex-col h-full w-full overflow-hidden relative bg-[#efeae2] dark:bg-[#0b141a]">
+            {/* Background Pattern */}
             <div className="absolute inset-0 opacity-[0.06] dark:opacity-[0.03] pointer-events-none bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')] z-0"></div>
 
             <div className="flex-none z-10 w-full">
@@ -122,7 +150,7 @@ export default function ChatPage() {
                 ref={containerRef}
                 onScroll={handleScroll}
                 className="flex-1 overflow-y-auto relative z-0 custom-scrollbar overscroll-contain"
-                style={{ scrollBehavior: 'smooth' }}
+                // IMPORTANT: Removed CSS scroll-behavior: smooth. We handle it in JS now.
             >
                 {isLoadingHistory ? (
                     <div className="flex flex-col items-center justify-center h-full space-y-4">
@@ -135,18 +163,18 @@ export default function ChatPage() {
                             height: `${virtualizer.getTotalSize()}px`,
                             width: '100%',
                             position: 'relative',
-                            paddingTop: isLoadingMore ? '40px' : '0',
                         }}
                         className="px-4 pb-4"
                     >
-                        {/* Pagination loader at top */}
+                        {/* Pagination Loading Indicator */}
                         {isLoadingMore && (
-                            <div className="absolute top-0 left-0 right-0 flex justify-center py-2 bg-gradient-to-b from-white/80 dark:from-[#0b141a]/80 backdrop-blur-sm z-10">
-                                <Loader2 className="w-5 h-5 text-primary animate-spin opacity-70" />
+                            <div className="absolute top-2 left-0 right-0 flex justify-center z-10">
+                                <div className="bg-white/90 dark:bg-[#111b21]/90 backdrop-blur p-1.5 rounded-full shadow-md">
+                                    <Loader2 className="w-4 h-4 text-primary animate-spin" />
+                                </div>
                             </div>
                         )}
 
-                        {/* Date headers and messages */}
                         {items.map((virtualRow) => {
                             const msg = chatHistory[virtualRow.index];
                             if (!msg) return null;
@@ -177,8 +205,8 @@ export default function ChatPage() {
                                     }}
                                 >
                                     {showDateHeader && (
-                                        <div className="flex justify-center my-4">
-                                            <span className="text-[11px] font-medium text-[#54656f] dark:text-[#8696a0] bg-[#eef0f2] dark:bg-[#1f2c34] px-3 py-1.5 rounded-lg shadow-sm border border-black/5">
+                                        <div className="flex justify-center my-4 sticky top-2 z-10 pointer-events-none">
+                                            <span className="text-[11px] font-medium text-[#54656f] dark:text-[#8696a0] bg-[#eef0f2] dark:bg-[#1f2c34] px-3 py-1.5 rounded-lg shadow-sm border border-black/5 opacity-90 backdrop-blur-sm">
                                                 {getMessageDateLabel(msg.timestamp)}
                                             </span>
                                         </div>
@@ -196,20 +224,22 @@ export default function ChatPage() {
                         })}
                     </div>
                 )}
+            </div>
 
-                {/* Scroll to bottom button */}
-                {unreadBelowCount > 0 && (
-                    <button
-                        onClick={scrollToBottom}
-                        className="fixed bottom-24 right-6 md:right-10 z-[40] bg-white dark:bg-[#202c33] text-primary p-3 rounded-full shadow-2xl border border-zinc-200 dark:border-zinc-700 hover:scale-110 active:scale-95 transition-all animate-in slide-in-from-bottom-4 fade-in duration-300 group"
-                    >
-                        <ChevronDown className="w-6 h-6" />
-                        <span className="absolute -top-2 -right-1 min-w-[22px] h-[22px] px-1 bg-red-500 text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-white dark:border-[#202c33] shadow-sm animate-in zoom-in duration-300">
+            {/* Scroll To Bottom Button */}
+            {showScrollBottom && (
+                <button
+                    onClick={scrollToBottomManual}
+                    className="fixed bottom-24 right-6 md:right-10 z-[40] bg-white dark:bg-[#202c33] text-[#54656f] dark:text-[#aebac1] p-2.5 rounded-full shadow-xl border border-zinc-100 dark:border-zinc-700 hover:scale-105 active:scale-95 transition-all animate-in slide-in-from-bottom-2 duration-200"
+                >
+                    <ChevronDown className="w-6 h-6" />
+                    {unreadBelowCount > 0 && (
+                        <span className="absolute -top-1 -right-1 min-w-[20px] h-[20px] px-1 bg-[#00a884] text-white text-[10px] font-bold flex items-center justify-center rounded-full shadow-sm animate-in zoom-in duration-200">
                             {unreadBelowCount > 99 ? '99+' : unreadBelowCount}
                         </span>
-                    </button>
-                )}
-            </div>
+                    )}
+                </button>
+            )}
 
             <div className="flex-none z-20 w-full bg-[#f0f2f5] dark:bg-[#202c33]">
                 <ChatInput
