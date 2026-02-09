@@ -14,7 +14,7 @@ interface UseScrollBehaviorProps {
 
 /**
  * Scroll behavior and unread message tracking.
- * No rendering logic - only scroll-related state.
+ * Handles pagination triggers and unread counts without cascading renders.
  */
 export const useScrollBehavior = ({
                                       chatHistory,
@@ -28,48 +28,45 @@ export const useScrollBehavior = ({
                                   }: UseScrollBehaviorProps) => {
     const [unreadBelowCount, setUnreadBelowCount] = useState(0);
     const containerRef = useRef<HTMLDivElement>(null);
-    const countedMessageIds = useRef<Set<string>>(new Set());
 
-    // We use a ref to track the previous length to detect NEW messages specifically
-    const prevHistoryLengthRef = useRef(chatHistory.length);
+    // We use a ref to track the latest message ID to detect NEW incoming messages
+    // vs simply re-rendering existing ones.
+    const lastProcessedMessageId = useRef<string | null>(null);
 
     /**
-     * Track incoming messages for unread counting
-     * Optimized to avoid cascading renders
+     * Effect: Track incoming messages for unread counting
+     * Optimized to avoid set-state loops.
      */
     useEffect(() => {
-        const currentLength = chatHistory.length;
-        const prevLength = prevHistoryLengthRef.current;
+        if (chatHistory.length === 0) return;
 
-        // Only run if we actually added messages (and not just initial load)
-        if (currentLength > prevLength && prevLength > 0) {
-            const lastMessage = chatHistory[currentLength - 1];
-            const container = containerRef.current;
+        const lastMessage = chatHistory[chatHistory.length - 1];
 
-            // Only count messages from others
-            if (lastMessage.authorId !== currentUserId && container) {
-                const isNearBottom =
-                    container.scrollHeight - container.scrollTop - container.clientHeight < 300;
+        // If this is the same message we already processed, ignore.
+        if (lastProcessedMessageId.current === lastMessage.id) return;
+        lastProcessedMessageId.current = lastMessage.id;
 
-                // Check if we already counted this specific ID to be safe
-                if (!isNearBottom && !countedMessageIds.current.has(lastMessage.id)) {
-                    setUnreadBelowCount((prev) => prev + 1);
-                    countedMessageIds.current.add(lastMessage.id);
-                }
+        const container = containerRef.current;
+
+        // Only count messages from others
+        if (lastMessage.authorId !== currentUserId && container) {
+            const { scrollTop, scrollHeight, clientHeight } = container;
+            // 200px threshold for being "at bottom"
+            const isNearBottom = scrollHeight - scrollTop - clientHeight < 200;
+
+            if (!isNearBottom) {
+                setUnreadBelowCount((prev) => prev + 1);
             }
         }
-
-        prevHistoryLengthRef.current = currentLength;
     }, [chatHistory, currentUserId]);
 
     /**
      * Reset unread count when active user changes
+     * Relies on parent key-remount or this effect.
      */
     useEffect(() => {
-        if (activeUserId) {
-            setUnreadBelowCount(0);
-            countedMessageIds.current.clear();
-        }
+        setUnreadBelowCount(0);
+        lastProcessedMessageId.current = null;
     }, [activeUserId]);
 
     /**
@@ -81,10 +78,11 @@ export const useScrollBehavior = ({
 
         const { scrollTop, scrollHeight, clientHeight } = container;
 
-        // Trigger pagination when scrolled near top
-        // Increased threshold to 200px for smoother experience
+        // 1. Pagination Trigger: Scrolled near top (scrollTop < 100)
+        // We add a check for scrollTop > 0 to prevent triggering when the list is just too short
         if (
-            scrollTop < 200 &&
+            scrollTop < 250 &&
+            scrollTop >= 0 &&
             hasMore &&
             !isLoadingMore &&
             chatHistory.length > 0
@@ -93,14 +91,14 @@ export const useScrollBehavior = ({
             loadMoreMessages(conversationId, oldestMessageId);
         }
 
-        // Clear unread counter when near bottom
+        // 2. Unread Count & Read Status: Scrolled near bottom
         const isNearBottom = scrollHeight - scrollTop - clientHeight < 200;
         if (isNearBottom) {
-            // Only update state if it's not already 0 to avoid re-renders
-            setUnreadBelowCount((prev) => (prev > 0 ? 0 : prev));
-            if(countedMessageIds.current.size > 0) countedMessageIds.current.clear();
+            if (unreadBelowCount > 0) {
+                setUnreadBelowCount(0);
+            }
 
-            // Mark messages as read
+            // Mark messages as read if valid
             if (document.visibilityState === 'visible') {
                 markAsRead(conversationId, activeUserId);
             }
@@ -113,11 +111,9 @@ export const useScrollBehavior = ({
         conversationId,
         activeUserId,
         markAsRead,
+        unreadBelowCount // Added dependency to safely clear count
     ]);
 
-    /**
-     * Scroll to bottom with smooth animation
-     */
     const scrollToBottom = useCallback(() => {
         if (containerRef.current) {
             containerRef.current.scrollTo({
@@ -125,21 +121,13 @@ export const useScrollBehavior = ({
                 behavior: 'smooth',
             });
             setUnreadBelowCount(0);
-            countedMessageIds.current.clear();
         }
     }, []);
 
-    /**
-     * Instant scroll to bottom (for initial load)
-     */
     const scrollToBottomInstant = useCallback(() => {
         if (containerRef.current) {
-            // We use requestAnimationFrame to ensure DOM is ready
-            requestAnimationFrame(() => {
-                if (containerRef.current) {
-                    containerRef.current.scrollTop = containerRef.current.scrollHeight;
-                }
-            });
+            // Force layout calculation
+            containerRef.current.scrollTop = containerRef.current.scrollHeight;
         }
     }, []);
 

@@ -81,6 +81,7 @@ export default function ChatPage() {
                 style={{ scrollBehavior: 'auto' }}
             >
                 <MessageList
+                    key={activeUser.id}
                     chatHistory={chatHistory}
                     currentUserId={currentUser?.id || null}
                     containerRef={containerRef}

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Message } from '@/types';
 
 /**
@@ -6,30 +6,14 @@ import { Message } from '@/types';
  * No socket logic, no scroll logic - just state.
  */
 export const useMessageState = (activeUserId: string | null) => {
+    // Note: We rely on the parent component to remount this hook
+    // (via key={activeUserId}) when the user changes to reset state.
     const [chatHistory, setChatHistory] = useState<(Message & { isLocal?: boolean })[]>([]);
-    const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+    const [isLoadingHistory, setIsLoadingHistory] = useState(true); // Default to true on mount
     const [hasMore, setHasMore] = useState(false);
     const [isLoadingMore, setIsLoadingMore] = useState(false);
     const [conversationId, setConversationId] = useState<string | null>(null);
     const [isRemoteTyping, setIsRemoteTyping] = useState(false);
-
-    // Track the current active user to prevent race conditions in state updates
-    const activeUserIdRef = useRef(activeUserId);
-
-    // Reset state when active user changes
-    useEffect(() => {
-        activeUserIdRef.current = activeUserId;
-        if (activeUserId) {
-            // We batch these updates or use a transition if available,
-            // but standard React setState batching handles this in Event handlers.
-            // Inside useEffect, this runs after render.
-            setChatHistory([]);
-            setIsLoadingHistory(true);
-            setHasMore(false);
-            setIsLoadingMore(false);
-            setIsRemoteTyping(false);
-        }
-    }, [activeUserId]);
 
     // State update handlers
     const handleConversationJoined = useCallback((data: { conversationId: string }) => {
@@ -41,13 +25,14 @@ export const useMessageState = (activeUserId: string | null) => {
             setChatHistory(data.messages);
             setHasMore(data.hasMore);
             setIsLoadingHistory(false);
+            setIsLoadingMore(false);
         },
         []
     );
 
     const handleMoreMessagesLoaded = useCallback(
         (data: { messages: Message[]; hasMore: boolean }) => {
-            // Standardizing the merge: New older messages + Existing messages
+            // We prepend messages here
             setChatHistory((prev) => [...data.messages, ...prev]);
             setHasMore(data.hasMore);
             setIsLoadingMore(false);
@@ -79,20 +64,20 @@ export const useMessageState = (activeUserId: string | null) => {
 
     const handleUserTyping = useCallback(
         (data: { userId: string }) => {
-            if (data.userId === activeUserIdRef.current) {
+            if (data.userId === activeUserId) {
                 setIsRemoteTyping(true);
             }
         },
-        []
+        [activeUserId]
     );
 
     const handleUserStopTyping = useCallback(
         (data: { userId: string }) => {
-            if (data.userId === activeUserIdRef.current) {
+            if (data.userId === activeUserId) {
                 setIsRemoteTyping(false);
             }
         },
-        []
+        [activeUserId]
     );
 
     const handleMessagesRead = useCallback(
