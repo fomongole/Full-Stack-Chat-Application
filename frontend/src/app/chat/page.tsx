@@ -1,8 +1,9 @@
 'use client';
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useChatStore } from '@/store/useChatStore';
 import { useConversation } from '@/hooks/chat/useConversation';
+import { useAuthStore } from '@/store/useAuthStore';
 import { User } from '@/types';
 import { getMessageDateLabel } from '@/lib/dateUtils';
 import { ChatHeader } from '@/components/chat/window/ChatHeader';
@@ -12,6 +13,8 @@ import { Loader2, ChevronDown } from 'lucide-react';
 
 export default function ChatPage() {
     const activeUser = useChatStore((state) => state.activeUser) as User | null;
+    const currentUser = useAuthStore((state) => state.user);
+
     const {
         message, setMessage, chatHistory, isLoadingHistory, sendMessage,
         sendMediaMessage, deleteMessage, replyTo, setReplyTo,
@@ -36,7 +39,6 @@ export default function ChatPage() {
     // Auto-scroll to bottom on initial load
     useEffect(() => {
         if (!isLoadingHistory && chatHistory.length > 0 && isInitialLoad.current && containerRef.current) {
-            // Scroll to bottom on initial load
             const timer = setTimeout(() => {
                 if (containerRef.current) {
                     containerRef.current.scrollTop = containerRef.current.scrollHeight;
@@ -49,14 +51,12 @@ export default function ChatPage() {
 
     // Auto-scroll when user sends a message
     const lastMessageAuthor = chatHistory[chatHistory.length - 1]?.authorId;
-    const currentUserId = useChatStore((state) => state.activeUser)?.id;
 
     useEffect(() => {
-        if (!isInitialLoad.current && lastMessageAuthor === currentUserId && containerRef.current) {
-            // User sent a message, scroll to bottom
+        if (!isInitialLoad.current && lastMessageAuthor === currentUser?.id && containerRef.current) {
             containerRef.current.scrollTop = containerRef.current.scrollHeight;
         }
-    }, [chatHistory.length, lastMessageAuthor, currentUserId]);
+    }, [chatHistory.length, lastMessageAuthor, currentUser?.id]);
 
     const scrollToBottom = () => {
         if (containerRef.current) {
