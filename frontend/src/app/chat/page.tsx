@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useChatStore } from '@/store/useChatStore';
 import { useConversation } from '@/hooks/chat/useConversation';
@@ -10,7 +10,6 @@ import { ChatHeader } from '@/components/chat/window/ChatHeader';
 import { MessageBubble } from '@/components/chat/window/MessageBubble';
 import { ChatInput } from '@/components/chat/window/ChatInput';
 import { Loader2, ChevronDown } from 'lucide-react';
-import { debounce } from 'lodash';
 
 export default function ChatPage() {
     const activeUser = useChatStore((state) => state.activeUser) as User | null;
@@ -21,136 +20,103 @@ export default function ChatPage() {
         sendMediaMessage, deleteMessage, replyTo, setReplyTo,
         isRemoteTyping, containerRef,
         unreadBelowCount, handleScroll,
-        isBlocked, isLoadingMore,
-        scrollToBottom, conversationId
+        isBlocked, isLoadingMore, isInitialLoad,
+        scrollToBottom, conversationId,
+        isPaginationInProgress
     } = useConversation(activeUser);
 
-    const [isAtBottom, setIsAtBottom] = useState(true);
-    const [isInitialScrollDone, setIsInitialScrollDone] = useState(false);
-    const scrollTimeoutRef = useRef<NodeJS.Timeout>();
-    const lastScrollHeightRef = useRef(0);
-    const isScrollingRef = useRef(false);
-    const initialLoadDoneRef = useRef(false);
+    // Track if we've done the initial scroll
+    const hasInitiallyScrolledRef = useRef(false);
+    const lastChatHistoryLengthRef = useRef(0);
 
-    // Virtualizer with stable reference
+    // Virtualizer setup
     const virtualizer = useVirtualizer({
         count: chatHistory.length,
         getScrollElement: () => containerRef.current,
         estimateSize: () => 100,
-        overscan: 10,
-        scrollMargin: 0,
+        overscan: 5,
+        scrollMargin: 50,
     });
 
     const items = virtualizer.getVirtualItems();
 
-    // Check if user is at/near bottom
-    const checkIsAtBottom = useCallback((container: HTMLElement) => {
-        if (!container) return true;
-        const scrollTop = container.scrollTop;
-        const scrollHeight = container.scrollHeight;
-        const clientHeight = container.clientHeight;
-        const distanceFromBottom = Math.abs(scrollHeight - scrollTop - clientHeight);
-        return distanceFromBottom < 100; // 100px threshold
-    }, []);
-
-    // Debounced scroll handler
-    const handleContainerScroll = useCallback(debounce(() => {
-        if (!containerRef.current) return;
-
-        const container = containerRef.current;
-        const isCurrentlyAtBottom = checkIsAtBottom(container);
-        setIsAtBottom(isCurrentlyAtBottom);
-
-        // Call the original handleScroll for pagination logic
-        handleScroll();
-    }, 150), [checkIsAtBottom, handleScroll]);
-
-    // Initial load - scroll to bottom once and only once
+    /**
+     * EFFECT 1: Initial Load - Scroll to bottom INSTANTLY on first load
+     * This runs once when messages first load
+     */
     useEffect(() => {
-        if (!isLoadingHistory && chatHistory.length > 0 && !isInitialScrollDone && containerRef.current) {
-            console.log('Initial scroll to bottom');
+        // Only run when we have messages and haven't scrolled yet
+        if (!hasInitiallyScrolledRef.current &&
+            !isLoadingHistory &&
+            chatHistory.length > 0 &&
+            containerRef.current) {
 
-            // Use requestAnimationFrame for smooth initial scroll
+            // Mark as scrolled IMMEDIATELY to prevent re-runs
+            hasInitiallyScrolledRef.current = true;
+
+            // Use requestAnimationFrame to ensure DOM is painted
             requestAnimationFrame(() => {
                 if (containerRef.current) {
+                    // INSTANT scroll - no animation
                     containerRef.current.scrollTop = containerRef.current.scrollHeight;
-                    lastScrollHeightRef.current = containerRef.current.scrollHeight;
-                    setIsInitialScrollDone(true);
-                    initialLoadDoneRef.current = true;
                 }
             });
         }
-    }, [isLoadingHistory, chatHistory.length, isInitialScrollDone]);
+    }, [isLoadingHistory, chatHistory.length]);
 
-    // Auto-scroll for new messages - only if user is at bottom
+    /**
+     * EFFECT 2: New Messages - Auto-scroll for new messages
+     * Only scrolls if:
+     * - Not initial load
+     * - Not during pagination
+     * - Message is from me OR user is near bottom
+     */
     useEffect(() => {
-        if (!containerRef.current || !initialLoadDoneRef.current) return;
+        // Skip if initial load or no messages
+        if (!hasInitiallyScrolledRef.current || chatHistory.length === 0) {
+            return;
+        }
 
-        const container = containerRef.current;
-        const currentScrollHeight = container.scrollHeight;
+        // Skip if pagination is in progress
+        if (isPaginationInProgress) {
+            lastChatHistoryLengthRef.current = chatHistory.length;
+            return;
+        }
 
-        // Check if new content was added (scroll height increased)
-        if (currentScrollHeight > lastScrollHeightRef.current) {
-            const isCurrentlyAtBottom = checkIsAtBottom(container);
+        // Only process if we have NEW messages
+        if (chatHistory.length > lastChatHistoryLengthRef.current && containerRef.current) {
+            const container = containerRef.current;
+            const lastMessage = chatHistory[chatHistory.length - 1];
+            const isMyMessage = lastMessage.authorId === currentUser?.id;
 
-            if (isCurrentlyAtBottom) {
+            // Check if user is near bottom
+            const scrollBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+            const isNearBottom = scrollBottom < 300;
+
+            // Auto-scroll if it's my message OR user is already near bottom
+            if (isMyMessage || isNearBottom) {
                 // Small delay to ensure DOM is updated
-                scrollTimeoutRef.current = setTimeout(() => {
-                    if (containerRef.current && !isScrollingRef.current) {
-                        isScrollingRef.current = true;
+                requestAnimationFrame(() => {
+                    if (containerRef.current) {
                         containerRef.current.scrollTop = containerRef.current.scrollHeight;
-
-                        // Reset scrolling flag after animation
-                        setTimeout(() => {
-                            isScrollingRef.current = false;
-                        }, 100);
                     }
-                }, 50);
+                });
             }
-
-            lastScrollHeightRef.current = currentScrollHeight;
         }
 
-        return () => {
-            if (scrollTimeoutRef.current) {
-                clearTimeout(scrollTimeoutRef.current);
-            }
-        };
-    }, [chatHistory, checkIsAtBottom]);
+        // Update last known length
+        lastChatHistoryLengthRef.current = chatHistory.length;
+    }, [chatHistory.length, currentUser?.id, isPaginationInProgress]);
 
-    // Handle pagination scroll preservation
+    /**
+     * EFFECT 3: Reset on user change
+     * Clear all scroll state when switching conversations
+     */
     useEffect(() => {
-        if (!containerRef.current || !initialLoadDoneRef.current) return;
-
-        const container = containerRef.current;
-        const currentScrollHeight = container.scrollHeight;
-
-        // If scroll height decreased (messages loaded above), preserve position
-        if (currentScrollHeight < lastScrollHeightRef.current) {
-            const scrollDifference = lastScrollHeightRef.current - currentScrollHeight;
-            container.scrollTop -= scrollDifference;
+        if (activeUser?.id) {
+            hasInitiallyScrolledRef.current = false;
+            lastChatHistoryLengthRef.current = 0;
         }
-
-        lastScrollHeightRef.current = currentScrollHeight;
-    }, [chatHistory]);
-
-    // Cleanup
-    useEffect(() => {
-        return () => {
-            if (scrollTimeoutRef.current) {
-                clearTimeout(scrollTimeoutRef.current);
-            }
-            initialLoadDoneRef.current = false;
-            setIsInitialScrollDone(false);
-        };
-    }, []);
-
-    // Reset when user changes
-    useEffect(() => {
-        setIsInitialScrollDone(false);
-        initialLoadDoneRef.current = false;
-        lastScrollHeightRef.current = 0;
-        isScrollingRef.current = false;
     }, [activeUser?.id]);
 
     if (!activeUser) return (
@@ -176,9 +142,9 @@ export default function ChatPage() {
 
             <div
                 ref={containerRef}
-                onScroll={handleContainerScroll}
+                onScroll={handleScroll}
                 className="flex-1 overflow-y-auto relative z-0 custom-scrollbar overscroll-contain"
-                style={{ scrollBehavior: 'smooth' }}
+                style={{ scrollBehavior: 'auto' }} // CRITICAL: 'auto' prevents visible scroll animation
             >
                 {isLoadingHistory ? (
                     <div className="flex flex-col items-center justify-center h-full space-y-4">
