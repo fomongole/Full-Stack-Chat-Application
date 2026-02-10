@@ -10,6 +10,7 @@ import ChatSidebar from '@/components/chat/ChatSidebar';
 import EditProfileModal from '@/components/modals/EditProfileModal';
 import LogoutModal from '@/components/modals/LogoutModal';
 import UserProfileModal from '@/components/modals/UserProfileModal';
+import { useRelationshipEvents } from '@/hooks/useRelationshipEvents';
 
 export default function ChatLayout({ children }: { children: React.ReactNode }) {
     const { users, isLoading } = useChatList();
@@ -21,6 +22,9 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
     const { logout } = useAuthStore();
     const router = useRouter();
     const socket = useSocket();
+
+    // Initialize the relationship listener
+    useRelationshipEvents();
 
     const handleLogout = () => {
         logout();
