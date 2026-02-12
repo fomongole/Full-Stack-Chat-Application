@@ -73,13 +73,17 @@ model Block {
   createdAt DateTime @default(now())
 
   blockerId String
-  blockedId String
+  blocker   User   @relation("Blocker", fields: [blockerId], references: [id])
 
-  blocker User @relation("Blocker", fields: [blockerId], references: [id])
-  blocked User @relation("Blocked", fields: [blockedId], references: [id])
+  blockedId String
+  blocked   User   @relation("Blocked", fields: [blockedId], references: [id])
+
+  // Frozen Snapshot
+  // Stores the state of the blocked user (image, about) at the moment of blocking.
+  // This ensures the blocker never sees *new* updates, but keeps the old view.
+  frozenPayload Json?
 
   @@unique([blockerId, blockedId])
-  // Speeds up "Am I blocked?" checks
   @@index([blockerId])
   @@index([blockedId])
 }

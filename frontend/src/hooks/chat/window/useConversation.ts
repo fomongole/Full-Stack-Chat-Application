@@ -12,10 +12,13 @@ import { useScrollBehavior } from './useScrollBehavior';
  * Refactored useConversation hook.
  * Now a clean facade that composes smaller, focused hooks.
  * Each concern is properly separated and testable.
+ * * ENTERPRISE UPDATE: Enforces Block Logic on incoming events.
  */
 export const useConversation = (activeUser: User | null) => {
     const socket = useSocket();
     const currentUser = useAuthStore((state) => state.user);
+
+    // STRICT BLOCK CHECK
     const isBlocked = activeUser?.hasBlocked || activeUser?.isBlockedBy;
     const activeUserId = activeUser?.id ?? null;
 
@@ -51,27 +54,26 @@ export const useConversation = (activeUser: User | null) => {
     } = useSocketEmitters({ socket });
 
     // --- SYNC REFS FOR EVENT HANDLERS ---
-    // We use refs so we can read the LATEST values inside the callback
-    // without forcing the callback to be recreated when these values change.
-    // This prevents the socket listeners from detaching/reattaching on every render.
     const activeUserIdRef = useRef(activeUserId);
     const conversationIdRef = useRef(conversationId);
+    const isBlockedRef = useRef(isBlocked);
 
     useEffect(() => {
         activeUserIdRef.current = activeUserId;
-    }, [activeUserId]);
+        isBlockedRef.current = isBlocked;
+    }, [activeUserId, isBlocked]);
 
     useEffect(() => {
         conversationIdRef.current = conversationId;
     }, [conversationId]);
 
-    // Define stable callbacks that can depend on emitters
-    // wrapped in useCallback to prevent re-subscription loops in useSocketListeners
+    // --- STABLE CALLBACKS WITH LOGIC GATES ---
+
     const onConversationJoined = useCallback(
         (data: { conversationId: string }) => {
             handleConversationJoined(data);
-            // Access ref to get current activeUserId without breaking stability
-            if (activeUserIdRef.current) {
+            // Don't send read receipts if blocked (Blackout logic)
+            if (activeUserIdRef.current && !isBlockedRef.current) {
                 markAsRead(data.conversationId, activeUserIdRef.current);
             }
         },
@@ -82,16 +84,17 @@ export const useConversation = (activeUser: User | null) => {
         (message: Message) => {
             handleMessageReceived(message);
 
-            // Access ref to check typing status
+            // Stop typing indicator
             if (message.authorId === activeUserIdRef.current) {
                 setIsRemoteTyping(false);
             }
 
-            // Access ref to check visibility/read status
+            // Read Receipts: Only if visible and NOT blocked
             if (
                 document.visibilityState === 'visible' &&
                 message.conversationId === conversationIdRef.current &&
-                activeUserIdRef.current
+                activeUserIdRef.current &&
+                !isBlockedRef.current
             ) {
                 markAsRead(message.conversationId, activeUserIdRef.current);
             }
@@ -99,7 +102,13 @@ export const useConversation = (activeUser: User | null) => {
         [handleMessageReceived, setIsRemoteTyping, markAsRead]
     );
 
-    // 2. SOCKET EVENT ORCHESTRATION (split into emitters and listeners)
+    // Filter Typing Events based on Block Status
+    const onUserTypingWrapper = useCallback((data: { userId: string }) => {
+        if (isBlockedRef.current) return;
+        handleUserTyping(data);
+    }, [handleUserTyping]);
+
+    // 2. SOCKET EVENT ORCHESTRATION
     useSocketListeners({
         socket,
         activeUserId: activeUser?.id || null,
@@ -108,12 +117,12 @@ export const useConversation = (activeUser: User | null) => {
         onMoreMessagesLoaded: handleMoreMessagesLoaded,
         onMessageReceived,
         onMessageDeleted: handleMessageDeleted,
-        onUserTyping: handleUserTyping,
+        onUserTyping: onUserTypingWrapper,
         onUserStopTyping: handleUserStopTyping,
         onMessagesRead: handleMessagesRead,
     });
 
-    // 3. SCROLL BEHAVIOR (scroll state and unread tracking)
+    // 3. SCROLL BEHAVIOR
     const {
         containerRef,
         unreadBelowCount,
@@ -137,7 +146,7 @@ export const useConversation = (activeUser: User | null) => {
         markAsRead,
     });
 
-    // 4. MESSAGE ACTIONS (send, delete, typing)
+    // 4. MESSAGE ACTIONS
     const {
         message,
         setMessage,
@@ -160,13 +169,11 @@ export const useConversation = (activeUser: User | null) => {
     });
 
     return {
-        // Message state
         chatHistory,
         isLoadingHistory,
         isLoadingMore,
         conversationId,
-        isRemoteTyping,
-        // Message actions
+        isRemoteTyping: isBlocked ? false : isRemoteTyping,
         message,
         setMessage,
         replyTo,
@@ -174,13 +181,11 @@ export const useConversation = (activeUser: User | null) => {
         sendMessage,
         sendMediaMessage,
         deleteMessage,
-        // Scroll behavior
         containerRef,
         unreadBelowCount,
         handleScroll,
         scrollToBottom,
         scrollToBottomInstant,
-        // Metadata
         isBlocked: isBlocked || false,
     };
 };

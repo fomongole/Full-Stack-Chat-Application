@@ -2,10 +2,19 @@ import { prisma } from '../config/prisma';
 import cloudinary from '../config/cloudinary';
 import { AppError } from '../utils/app.error';
 
+/**
+ * Service handling User Profile management, Blocking logic,
+ * and optimized sidebar data fetching.
+ */
 export class UserService {
+
+    /**
+     * Updates user profile text and optionally uploads a new profile image.
+     */
     async updateProfile(userId: string, data: { username?: string; about?: string; isPrivate?: string }, file?: Express.Multer.File) {
         let imageUrl: string | undefined;
 
+        // 1. Handle Image Upload to Cloudinary
         if (file) {
             const b64 = Buffer.from(file.buffer).toString('base64');
             const dataURI = "data:" + file.mimetype + ";base64," + b64;
@@ -23,18 +32,18 @@ export class UserService {
 
         const isPrivateBoolean = data.isPrivate === 'true';
 
-        // Check Username Uniqueness (if changing)
+        // 2. Check Username Uniqueness
         if (data.username) {
             const existingUser = await prisma.user.findUnique({
                 where: { username: data.username }
             });
 
-            // If user exists AND it's not the current user (collision)
             if (existingUser && existingUser.id !== userId) {
                 throw new AppError('This username is already taken.', 409);
             }
         }
 
+        // 3. Update Database
         return prisma.user.update({
             where: { id: userId },
             data: {
@@ -55,10 +64,31 @@ export class UserService {
         });
     }
 
+    /**
+     * Blocks a user and captures a "Frozen Snapshot" of their current profile.
+     * This ensures the blocker sees the profile as it was NOW, forever.
+     */
     async blockUser(blockerId: string, blockedId: string) {
         if (blockerId === blockedId) throw new AppError("You cannot block yourself", 400);
+
+        // Fetch the user to be blocked to snapshot their data
+        const targetUser = await prisma.user.findUnique({
+            where: { id: blockedId },
+            select: { image: true, about: true }
+        });
+
+        if (!targetUser) throw new AppError("User not found", 404);
+
         return await prisma.block.create({
-            data: { blockerId, blockedId }
+            data: {
+                blockerId,
+                blockedId,
+                // CAPTURE SNAPSHOT
+                frozenPayload: {
+                    image: targetUser.image,
+                    about: targetUser.about
+                }
+            }
         });
     }
 
@@ -70,17 +100,18 @@ export class UserService {
 
     /**
      * OPTIMIZATION: Lean Sidebar Fetcher
-     * 1. Uses 'select' to fetch ONLY needed columns (saves memory/bandwidth).
-     * 2. Fetches only necessary relation data.
+     * Handles complex "View Logic":
+     * - Private Accounts: Hide data if not connected
+     * - Blocked By Me: Show "Frozen Snapshot" (Old Image/Bio).
+     * - Blocked Me: Show "Blackout" (No Image/Bio).
      */
     async getSidebarUsers(currentUserId: string) {
         const conversations = await prisma.conversation.findMany({
             where: {
                 participants: { some: { id: currentUserId } }
             },
-            // Performance: Sort by index
             orderBy: { updatedAt: 'desc' },
-            take: 100, // Safety limit
+            take: 100,
             select: {
                 id: true,
                 updatedAt: true,
@@ -95,9 +126,14 @@ export class UserService {
                         isPrivate: true,
                         about: true,
                         email: true,
-                        // Lean Block Check
-                        blockedBy: { where: { blockerId: currentUserId }, select: { id: true } },
-                        blockedUsers: { where: { blockedId: currentUserId }, select: { id: true } }
+                        blockedBy: {
+                            where: { blockerId: currentUserId },
+                            select: { id: true, frozenPayload: true }
+                        },
+                        blockedUsers: {
+                            where: { blockedId: currentUserId },
+                            select: { id: true }
+                        }
                     }
                 },
                 messages: {
@@ -124,7 +160,6 @@ export class UserService {
             }
         });
 
-        // The mapping logic operates on lighter objects
         return conversations.map(conv => {
             const user = conv.participants[0];
             if (!user) return null;
@@ -132,23 +167,50 @@ export class UserService {
             const lastMsg = conv.messages[0];
             const unreadCount = conv._count.messages;
 
-            const iBlockedThem = user.blockedBy.length > 0;
+            // --- RELATIONSHIP LOGIC ---
+            const iBlockedThemBlock = user.blockedBy[0]; // If exists, I blocked them
+            const iBlockedThem = !!iBlockedThemBlock;
             const theyBlockedMe = user.blockedUsers.length > 0;
-            const isStatusHidden = iBlockedThem || theyBlockedMe;
-            const isProfileHidden = theyBlockedMe;
 
+            const isStatusHidden = iBlockedThem || theyBlockedMe;
+
+            // --- IMAGE / ABOUT RESOLUTION ---
+            let finalImage = user.image;
+            let finalAbout = user.about;
+
+            // CASE 1: They Blocked Me -> Total Blackout
+            if (theyBlockedMe) {
+                finalImage = null; // Default placeholder
+                finalAbout = null; // "No bio available"
+            }
+            // CASE 2: I Blocked Them -> Frozen Snapshot
+            else if (iBlockedThem) {
+                const snapshot = iBlockedThemBlock.frozenPayload as any;
+                if (snapshot) {
+                    finalImage = snapshot.image || null; // The image from back then
+                    finalAbout = snapshot.about || null;
+                }
+                // If no snapshot (legacy block), default to current but stop updates (backend won't push new ones via socket).
+            }
+            // CASE 3: Private Account (and not blocked)
+            else if (user.isPrivate) {
+                // Private users still show their image to people they chatted with? but maybe hide Bio/Email.
+                finalAbout = null;
+            }
+
+            // --- MESSAGE PREVIEW ---
             let previewText = lastMsg?.content || "Media message";
             if (lastMsg?.messageType === 'IMAGE') previewText = "📷 Image";
             if (lastMsg?.messageType === 'VIDEO') previewText = "🎥 Video";
             if (lastMsg && lastMsg.authorId === currentUserId) previewText = `You: ${previewText}`;
             if (lastMsg && lastMsg.isDeleted) previewText = "Message deleted";
 
-            const baseUser = {
+            return {
                 id: user.id,
                 username: user.username,
-                image: isProfileHidden ? null : user.image,
-                about: isProfileHidden ? null : user.about,
-                email: isProfileHidden ? null : user.email,
+                image: finalImage,
+                about: finalAbout,
+                email: (theyBlockedMe || iBlockedThem || user.isPrivate) ? null : user.email,
                 isOnline: isStatusHidden ? false : user.isOnline,
                 lastSeen: isStatusHidden ? new Date(0) : user.lastSeen,
                 isPrivate: user.isPrivate,
@@ -158,17 +220,16 @@ export class UserService {
                 hasBlocked: iBlockedThem,
                 isBlockedBy: theyBlockedMe
             };
-
-            if (user.isPrivate && !isProfileHidden && !iBlockedThem) {
-                return { ...baseUser, about: null, email: null };
-            }
-
-            return baseUser;
         }).filter(Boolean);
     }
 
+    /**
+     * Search Users:
+     * - Must NOT show users who blocked me.
+     * - Must show users I blocked (usually), but maybe at bottom or marked.
+     * - Respects privacy settings (hiding about/status).
+     */
     async searchUsers(query: string, currentUserId: string) {
-        // Optimized search with specific Select
         const users = await prisma.user.findMany({
             where: {
                 AND: [
@@ -179,8 +240,8 @@ export class UserService {
                             { email: { contains: query, mode: 'insensitive' } }
                         ]
                     },
-                    { blockedUsers: { none: { blockedId: currentUserId } } },
-                    { blockedBy: { none: { blockerId: currentUserId } } }
+                    // Hide users who blocked ME
+                    { blockedUsers: { none: { blockedId: currentUserId } } }
                 ]
             },
             take: 20,
@@ -191,11 +252,44 @@ export class UserService {
                 isPrivate: true,
                 isOnline: true,
                 lastSeen: true,
-                about: true
+                about: true,
+                // Check if I blocked them
+                blockedBy: {
+                    where: { blockerId: currentUserId },
+                    select: { frozenPayload: true }
+                }
             }
         });
 
-        return users.map(user => user.isPrivate ? { ...user, isPrivate: true, about: null } : user);
+        return users.map(user => {
+            const iBlockedThemBlock = user.blockedBy[0];
+
+            // If I blocked them, show Snapshot. Else show Current.
+            let displayImage = user.image;
+            let displayAbout = user.about;
+
+            if (iBlockedThemBlock && iBlockedThemBlock.frozenPayload) {
+                const snap = iBlockedThemBlock.frozenPayload as any;
+                displayImage = snap.image;
+                displayAbout = snap.about;
+            }
+
+            // Privacy Logic
+            if (user.isPrivate) {
+                displayAbout = null;
+            }
+
+            return {
+                id: user.id,
+                username: user.username,
+                image: displayImage,
+                isPrivate: user.isPrivate,
+                // Hide status for blocked/private users
+                isOnline: (user.isPrivate || iBlockedThemBlock) ? false : user.isOnline,
+                lastSeen: (user.isPrivate || iBlockedThemBlock) ? null : user.lastSeen,
+                about: displayAbout
+            };
+        });
     }
 }
 

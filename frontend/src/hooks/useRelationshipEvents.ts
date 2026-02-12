@@ -2,6 +2,10 @@ import { useEffect } from 'react';
 import { useSocket } from '@/hooks/useSocket';
 import { useChatStore } from '@/store/useChatStore';
 
+/**
+ * Handles real-time Block/Unblock events for the *Active Chat Window*.
+ * Ensures the UI immediately reflects privacy changes (hiding status/input).
+ */
 export const useRelationshipEvents = () => {
     const socket = useSocket();
     const activeUser = useChatStore((state) => state.activeUser);
@@ -17,25 +21,32 @@ export const useRelationshipEvents = () => {
 
                 switch (data.type) {
                     case 'BLOCK':
-                        // I blocked them (received via my own socket)
+                        // I blocked them.
                         updatedUser.hasBlocked = true;
+                        // Strict Alignment: I shouldn't see their status anymore
+                        updatedUser.isOnline = false;
+                        updatedUser.lastSeen = undefined;
+                        // Keep their image (Frozen Snapshot logic handled by sidebar refetch)
                         break;
 
                     case 'UNBLOCK':
-                        // I unblocked them
+                        // I unblocked them.
                         updatedUser.hasBlocked = false;
+                        // Status will update on next heartbeat or sidebar refresh
                         break;
 
                     case 'BLOCKED_BY':
-                        // They blocked me
+                        // They blocked me.
                         updatedUser.isBlockedBy = true;
-                        // Immediately hide their online status/last seen for privacy consistency
+                        // Strict Alignment: Total Blackout
                         updatedUser.isOnline = false;
                         updatedUser.lastSeen = undefined;
+                        updatedUser.about = undefined; // Hide bio
+                        updatedUser.image = undefined; // Hide image (local optimistic update)
                         break;
 
                     case 'UNBLOCKED_BY':
-                        // They unblocked me
+                        // They unblocked me.
                         updatedUser.isBlockedBy = false;
                         break;
                 }

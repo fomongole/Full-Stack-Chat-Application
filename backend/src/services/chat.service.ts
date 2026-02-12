@@ -11,8 +11,8 @@ interface SendMessageParams {
 }
 
 export class ChatService {
+
     async getOrCreateConversation(user1Id: string, user2Id: string) {
-        // Optimization: Check for existing convo using findFirst (uses implicit index on relations)
         let conversation = await prisma.conversation.findFirst({
             where: {
                 AND: [
@@ -20,7 +20,7 @@ export class ChatService {
                     { participants: { some: { id: user2Id } } }
                 ]
             },
-            select: { id: true } // Only need ID initially
+            select: { id: true }
         });
 
         if (!conversation) {
@@ -39,12 +39,12 @@ export class ChatService {
     async processPrivateMessage(params: SendMessageParams) {
         const { userId, conversationId, content, replyToId, attachmentUrl, messageType = 'TEXT' } = params;
 
-        // 1. Security & Existence Check (Optimized Select)
+        // 1. Fetch Conversation & Participants
         const conversation = await prisma.conversation.findUnique({
             where: { id: conversationId },
             include: {
                 participants: {
-                    select: { id: true } // Not fetching full user objects
+                    select: { id: true }
                 }
             }
         });
@@ -53,23 +53,26 @@ export class ChatService {
 
         const recipient = conversation.participants.find(p => p.id !== userId);
 
-        // Block Check (Optimized using count instead of findFirst to avoid fetching object)
+        // 2. BLOCK CHECK (Bidirectional)
+        // If either party blocked the other, messages fail.
         if (recipient) {
             const blockCount = await prisma.block.count({
                 where: {
                     OR: [
-                        { blockerId: recipient.id, blockedId: userId },
-                        { blockerId: userId, blockedId: recipient.id }
+                        { blockerId: recipient.id, blockedId: userId }, // They blocked me
+                        { blockerId: userId, blockedId: recipient.id }  // I blocked them
                     ]
                 }
             });
 
             if (blockCount > 0) {
-                throw new AppError("Message cannot be sent. Block restriction active.", 403);
+                // Return a generic error or silent fail.
+                // 403 Forbidden is appropriate.
+                throw new AppError("Message cannot be sent. You are blocked or have blocked this user.", 403);
             }
         }
 
-        // 2. Transaction: Create Message & Update Conversation timestamp
+        // 3. Create Message
         const [newMessage] = await prisma.$transaction([
             prisma.message.create({
                 data: {
@@ -80,7 +83,6 @@ export class ChatService {
                     attachmentUrl,
                     replyToId: replyToId
                 },
-                // Lean Select for the returned message
                 select: {
                     id: true,
                     content: true,
@@ -111,7 +113,6 @@ export class ChatService {
     }
 
     async deleteMessage(userId: string, messageId: string) {
-        // Safety check
         const message = await prisma.message.findUnique({
             where: { id: messageId },
             select: { authorId: true }
@@ -152,21 +153,11 @@ export class ChatService {
         return this.formatMessage(deletedMessage);
     }
 
-    /**
-     * PAGINATED HISTORY FETCHING (Optimized)
-     * Fetches the latest N messages relative to a cursor.
-     */
     async getConversationHistory(conversationId: string, limit = 50, cursor?: string) {
-        // OPTIMIZATION:
-        // Uses the @@index([conversationId, createdAt(sort: Desc)]) defined in schema
         const messages = await prisma.message.findMany({
             where: { conversationId },
             take: limit,
-            // If cursor exists, skip the cursor itself and fetch the messages before it
-            ...(cursor && {
-                skip: 1,
-                cursor: { id: cursor },
-            }),
+            ...(cursor && { skip: 1, cursor: { id: cursor } }),
             orderBy: { createdAt: 'desc' },
             select: {
                 id: true,
@@ -189,19 +180,16 @@ export class ChatService {
             }
         });
 
-        // Format and reverse back to chronological for the UI
         const formatted = messages.map(msg => this.formatMessage(msg)).reverse();
 
         return {
             messages: formatted,
             hasMore: messages.length === limit,
-            // The last item in the 'desc' array is the oldest message in this batch
             nextCursor: messages.length > 0 ? messages[messages.length - 1].id : null
         };
     }
 
     async markMessagesAsRead(conversationId: string, currentUserId: string) {
-        // Uses @@index([conversationId, isRead])
         await prisma.message.updateMany({
             where: {
                 conversationId: conversationId,
@@ -213,7 +201,6 @@ export class ChatService {
     }
 
     private formatMessage(msg: any) {
-        // Helper to keep formatting consistent
         return {
             id: msg.id,
             conversationId: msg.conversationId,

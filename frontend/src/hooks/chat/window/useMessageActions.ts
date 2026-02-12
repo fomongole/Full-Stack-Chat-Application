@@ -50,32 +50,33 @@ export const useMessageActions = ({
                 !socket ||
                 !conversationId ||
                 !activeUser ||
-                currentUser?.isPrivate ||
                 isBlocked
             ) {
                 return;
             }
 
+            // Privacy Logic: If I am private, do I send typing?
+            // Standard behavior: YES, to the person I am chatting with.
+            // NO, to global listeners.
+            // Since this emits to a specific room/user, it is safe.
+
             const now = Date.now();
-            // Emit typing event max once every 2 seconds
             if (now - lastTypingEmitRef.current > 2000) {
                 emitTyping(conversationId, activeUser.id);
                 lastTypingEmitRef.current = now;
             }
 
-            // Clear existing timeout
             if (typingTimeoutRef.current) {
                 clearTimeout(typingTimeoutRef.current);
             }
 
-            // Stop typing after 3 seconds of inactivity
             typingTimeoutRef.current = setTimeout(() => {
                 if (activeUser) {
                     emitStopTyping(conversationId, activeUser.id);
                 }
             }, 3000);
         },
-        [socket, conversationId, activeUser, currentUser, isBlocked, emitTyping, emitStopTyping]
+        [socket, conversationId, activeUser, isBlocked, emitTyping, emitStopTyping]
     );
 
     /**
@@ -85,14 +86,10 @@ export const useMessageActions = ({
         (e?: React.FormEvent) => {
             if (e) e.preventDefault();
 
-            if (
-                isBlocked ||
-                !message.trim() ||
-                !socket ||
-                !activeUser ||
-                !conversationId ||
-                !currentUser
-            ) {
+            // Strict Block Check
+            if (isBlocked) return;
+
+            if (!message.trim() || !socket || !activeUser || !conversationId || !currentUser) {
                 return;
             }
 
@@ -116,6 +113,7 @@ export const useMessageActions = ({
                         id: replyTo.id,
                         username: replyTo.username,
                         content: replyTo.content || 'Media',
+                        messageType: replyTo.messageType
                     }
                     : null,
             };
@@ -151,13 +149,7 @@ export const useMessageActions = ({
      */
     const sendMediaMessage = useCallback(
         async (file: File, caption: string) => {
-            if (
-                isBlocked ||
-                !conversationId ||
-                !activeUser ||
-                !socket ||
-                !currentUser
-            ) {
+            if (isBlocked || !conversationId || !activeUser || !socket || !currentUser) {
                 return;
             }
 
@@ -184,6 +176,7 @@ export const useMessageActions = ({
                         id: replyTo.id,
                         username: replyTo.username,
                         content: replyTo.content || 'Media',
+                        messageType: replyTo.messageType
                     }
                     : null,
             };
@@ -200,7 +193,6 @@ export const useMessageActions = ({
                 });
                 const { url, type: serverType } = response.data.data;
 
-                // Update optimistic message with real URL
                 updateOptimisticMessage(tempId, { attachmentUrl: url });
 
                 socket.emit('send_message', {
@@ -212,7 +204,6 @@ export const useMessageActions = ({
                     messageType: serverType,
                 });
             } catch (error) {
-                // Remove failed message
                 removeOptimisticMessage(tempId);
                 throw error;
             }
@@ -230,9 +221,6 @@ export const useMessageActions = ({
         ]
     );
 
-    /**
-     * Delete message
-     */
     const deleteMessage = useCallback(
         (messageId: string) => {
             if (!socket || !conversationId) return;

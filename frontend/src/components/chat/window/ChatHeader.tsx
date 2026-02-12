@@ -23,6 +23,7 @@ export function ChatHeader({ user, isTyping }: ChatHeaderProps) {
     const setActiveUser = useChatStore((state) => state.setActiveUser);
     const menuRef = useRef<HTMLDivElement>(null);
 
+    // Logic: If Blocked, we are in a restricted state
     const isBlocked = user.hasBlocked || user.isBlockedBy;
 
     useEffect(() => {
@@ -37,8 +38,6 @@ export function ChatHeader({ user, isTyping }: ChatHeaderProps) {
 
     const handleBlockAction = async () => {
         const success = await toggleBlockStatus(user);
-
-        // Only close menus if the API call succeeded
         if (success) {
             setIsBlockModalOpen(false);
             setIsMenuOpen(false);
@@ -52,13 +51,18 @@ export function ChatHeader({ user, isTyping }: ChatHeaderProps) {
         });
     };
 
+    // PROFILE CLICK: If they blocked me, should I see their profile?
+    // Enterprise Standard: Yes, but it will be empty (handled by backend data privacy).
+    const handleProfileClick = () => {
+        setIsProfileOpen(true);
+    };
+
     return (
         <>
             <header className="px-3 md:px-4 py-2 border-b border-zinc-200/50 dark:border-zinc-800/50 flex items-center justify-between bg-[#f0f2f5]/90 dark:bg-[#202c33]/90 backdrop-blur-md sticky top-0 z-30 h-[60px]">
 
                 {/* LEFT: Back Button + User Info */}
                 <div className="flex items-center gap-1 md:gap-2 min-w-0 flex-1">
-                    {/* MOBILE BACK BUTTON */}
                     <button
                         onClick={() => setActiveUser(null)}
                         className="md:hidden p-1.5 -ml-1 text-zinc-500 hover:bg-black/5 dark:hover:bg-white/5 rounded-full transition-colors shrink-0"
@@ -66,24 +70,29 @@ export function ChatHeader({ user, isTyping }: ChatHeaderProps) {
                         <ArrowLeft className="w-5 h-5" />
                     </button>
 
-                    {/* CLICKABLE USER INFO -> Opens Profile Modal */}
                     <div
                         className="flex items-center gap-2 md:gap-3 cursor-pointer group p-1 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors min-w-0"
-                        onClick={() => setIsProfileOpen(true)}
+                        onClick={handleProfileClick}
                     >
+                        {/* IMAGE LOGIC:
+                            - hasBlocked: Shows Frozen Snapshot (Backend provided)
+                            - isBlockedBy: Shows Null (Backend provided) -> Renders Initials
+                        */}
                         <div className="h-8 w-8 md:h-10 md:w-10 rounded-full overflow-hidden bg-zinc-200 dark:bg-zinc-700 flex items-center justify-center text-zinc-500 dark:text-zinc-300 font-bold border border-zinc-100 dark:border-zinc-700 relative shrink-0">
-                            {user.image && !isBlocked ? (
+                            {user.image ? (
                                 <img src={user.image} alt="" className="h-full w-full object-cover" />
                             ) : (
                                 <span className="text-xs md:text-base">{user.username[0].toUpperCase()}</span>
                             )}
                         </div>
+
                         <div className="flex flex-col justify-center min-w-0">
                             <h3 className="font-semibold text-zinc-900 dark:text-zinc-100 text-sm md:text-[15px] leading-tight flex items-center gap-1.5 group-hover:underline decoration-zinc-400 underline-offset-2 truncate">
                                 <span className="truncate">{user.username}</span>
                                 {user.isPrivate && <Lock className="w-3 h-3 text-zinc-400 shrink-0" />}
                             </h3>
 
+                            {/* STATUS LOGIC: Hidden if blocked */}
                             {!isBlocked && !user.isPrivate && (
                                 <>
                                     {isTyping ? (
@@ -105,30 +114,18 @@ export function ChatHeader({ user, isTyping }: ChatHeaderProps) {
                 <div className="flex items-center gap-0.5 md:gap-1 shrink-0">
                     {!isBlocked && (
                         <>
-                            <button
-                                onClick={() => handleCallFeature('Audio')}
-                                className="p-2 md:p-2.5 rounded-full text-zinc-500 hover:bg-black/5 dark:hover:bg-white/10 hover:text-primary transition-all active:scale-95"
-                                title="Voice Call"
-                            >
+                            <button onClick={() => handleCallFeature('Audio')} className="p-2 md:p-2.5 rounded-full text-zinc-500 hover:bg-black/5 dark:hover:bg-white/10 hover:text-primary transition-all active:scale-95">
                                 <Phone className="w-4 h-4 md:w-5 md:h-5" />
                             </button>
-                            <button
-                                onClick={() => handleCallFeature('Video')}
-                                className="p-2 md:p-2.5 rounded-full text-zinc-500 hover:bg-black/5 dark:hover:bg-white/10 hover:text-primary transition-all active:scale-95"
-                                title="Video Call"
-                            >
+                            <button onClick={() => handleCallFeature('Video')} className="p-2 md:p-2.5 rounded-full text-zinc-500 hover:bg-black/5 dark:hover:bg-white/10 hover:text-primary transition-all active:scale-95">
                                 <Video className="w-4 h-4 md:w-5 md:h-5" />
                             </button>
                             <div className="w-px h-5 bg-zinc-300 dark:bg-zinc-700 mx-0.5 md:mx-1"></div>
                         </>
                     )}
 
-                    {/* Options Menu */}
                     <div className="relative" ref={menuRef}>
-                        <button
-                            onClick={() => setIsMenuOpen(!isMenuOpen)}
-                            className="p-2 md:p-2.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 text-zinc-500 transition-colors"
-                        >
+                        <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="p-2 md:p-2.5 rounded-full hover:bg-black/5 dark:hover:bg-white/10 text-zinc-500 transition-colors">
                             <MoreVertical className="w-4 h-4 md:w-5 md:h-5" />
                         </button>
 
@@ -164,7 +161,6 @@ export function ChatHeader({ user, isTyping }: ChatHeaderProps) {
                 </div>
             </header>
 
-            {/* Modals */}
             <BlockModal
                 isOpen={isBlockModalOpen}
                 onClose={() => setIsBlockModalOpen(false)}
