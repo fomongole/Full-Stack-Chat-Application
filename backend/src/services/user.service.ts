@@ -111,8 +111,13 @@ export class UserService {
                             with: {
                                 user: {
                                     with: {
-                                        blockedBy: { where: eq(blocks.blockerId, currentUserId) },
-                                        blockedUsers: { where: eq(blocks.blockedId, currentUserId) }
+                                        // ✅ FIX: Use callback syntax (b) to reference the ALIASED table
+                                        blockedBy: {
+                                            where: (b, { eq }) => eq(b.blockerId, currentUserId)
+                                        },
+                                        blockedUsers: {
+                                            where: (b, { eq }) => eq(b.blockedId, currentUserId)
+                                        }
                                     }
                                 }
                             }
@@ -216,8 +221,13 @@ export class UserService {
             ),
             limit: 20,
             with: {
-                blockedBy: { where: eq(blocks.blockerId, currentUserId) },
-                blockedUsers: { where: eq(blocks.blockedId, currentUserId) }
+                // ✅ FIX: Applied same callback fix here for search consistency
+                blockedBy: {
+                    where: (b, { eq }) => eq(b.blockerId, currentUserId)
+                },
+                blockedUsers: {
+                    where: (b, { eq }) => eq(b.blockedId, currentUserId)
+                }
             }
         });
 
