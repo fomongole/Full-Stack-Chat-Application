@@ -1,255 +1,107 @@
-import { eq, ne, and, or, desc, like } from 'drizzle-orm';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import { eq } from 'drizzle-orm';
 import { db } from '../config/db';
-import { users, blocks, conversationParticipants, conversations, messages } from '../db/schema';
-import cloudinary from '../config/cloudinary';
+import { users } from '../db/schema';
+import { env } from '../config/env';
 import { AppError } from '../utils/app.error';
+import { generateAccessToken, generateRefreshToken } from '../utils/token.util';
 
-/**
- * Service handling User Profile management, Blocking logic,
- * and optimized sidebar data fetching.
- */
-export class UserService {
+export class AuthService {
+    private async generateUniqueUsername(baseEmail: string): Promise<string> {
+        const prefix = baseEmail.split('@')[0];
+        let isUnique = false;
+        let finalUsername = prefix;
 
-    /**
-     * Updates user profile text and optionally uploads a new profile image.
-     */
-    async updateProfile(userId: string, data: { username?: string; about?: string; isPrivate?: string }, file?: Express.Multer.File) {
-        let imageUrl: string | undefined;
-
-        // 1. Handle Image Upload to Cloudinary
-        if (file) {
-            const b64 = Buffer.from(file.buffer).toString('base64');
-            const dataURI = "data:" + file.mimetype + ";base64," + b64;
-            try {
-                const uploadResponse = await cloudinary.uploader.upload(dataURI, {
-                    folder: 'chat-app-profiles',
-                    resource_type: 'image',
-                    transformation: [{ width: 500, height: 500, crop: "fill" }]
-                });
-                imageUrl = uploadResponse.secure_url;
-            } catch (error) {
-                throw new AppError('Failed to upload image', 500);
+        while (!isUnique) {
+            const existing = await db.query.users.findFirst({
+                where: eq(users.username, finalUsername)
+            });
+            if (!existing) {
+                isUnique = true;
+            } else {
+                finalUsername = `${prefix}_${Math.floor(Math.random() * 10000)}`;
             }
         }
+        return finalUsername;
+    }
 
-        const isPrivateBoolean = data.isPrivate === 'true';
+    async register(userData: any) {
+        const existingEmail = await db.query.users.findFirst({
+            where: eq(users.email, userData.email)
+        });
+        if (existingEmail) throw new AppError('User with this email already exists', 400);
 
-        // 2. Check Username Uniqueness
-        if (data.username) {
+        let username = userData.username;
+        if (!username) {
+            username = await this.generateUniqueUsername(userData.email);
+        } else {
             const existingUser = await db.query.users.findFirst({
-                where: eq(users.username, data.username)
+                where: eq(users.username, username)
             });
-
-            if (existingUser && existingUser.id !== userId) {
-                throw new AppError('This username is already taken.', 409);
-            }
+            if (existingUser) throw new AppError('Username is already taken', 400);
         }
 
-        // 3. Update Database
-        const [updatedUser] = await db.update(users)
-            .set({
-                ...(data.username && { username: data.username }),
-                ...(data.about && { about: data.about }),
-                ...(data.isPrivate !== undefined && { isPrivate: isPrivateBoolean }),
-                ...(imageUrl && { image: imageUrl }),
-            })
-            .where(eq(users.id, userId))
-            .returning();
+        const hashedPassword = await bcrypt.hash(userData.password, 12);
 
-        return updatedUser;
+        const [newUser] = await db.insert(users).values({
+            email: userData.email,
+            username: username,
+            password: hashedPassword,
+            image: userData.image || null,
+            about: userData.about || "Hey there! I'm using Chat App."
+        }).returning();
+
+        const accessToken = generateAccessToken({ id: newUser.id, username: newUser.username });
+        const refreshToken = generateRefreshToken({ id: newUser.id, username: newUser.username });
+
+        return { accessToken, refreshToken, user: newUser };
+    }
+
+    async login(credentials: any) {
+        const user = await db.query.users.findFirst({
+            where: eq(users.email, credentials.email)
+        });
+
+        if (!user || !(await bcrypt.compare(credentials.password, user.password))) {
+            throw new AppError('Invalid email or password', 401);
+        }
+
+        // Update to online immediately on login
+        await db.update(users)
+            .set({ isOnline: true })
+            .where(eq(users.id, user.id));
+
+        // Generate BOTH tokens
+        const accessToken = generateAccessToken({ id: user.id, username: user.username });
+        const refreshToken = generateRefreshToken({ id: user.id, username: user.username });
+
+        return { accessToken, refreshToken, user };
     }
 
     /**
-     * Blocks a user and captures a "Frozen Snapshot" of their current profile.
-     * This ensures the blocker sees the profile as it was NOW, forever.
+     * Verifies the Refresh Token and issues a new Access Token
      */
-    async blockUser(blockerId: string, blockedId: string) {
-        if (blockerId === blockedId) throw new AppError("You cannot block yourself", 400);
+    async refreshToken(token: string) {
+        try {
+            // 1. Verify the refresh token
+            const decoded = jwt.verify(token, env.JWT_SECRET) as { id: string; username: string };
 
-        // Fetch the user to be blocked to snapshot their data
-        const targetUser = await db.query.users.findFirst({
-            where: eq(users.id, blockedId),
-            columns: { image: true, about: true }
-        });
+            // 2. Check if user still exists (Security Check)
+            const user = await db.query.users.findFirst({ where: eq(users.id, decoded.id) });
 
-        if (!targetUser) throw new AppError("User not found", 404);
-
-        return await db.insert(blocks).values({
-            blockerId,
-            blockedId,
-            // CAPTURE SNAPSHOT
-            frozenPayload: {
-                image: targetUser.image,
-                about: targetUser.about
-            }
-        });
-    }
-
-    async unblockUser(blockerId: string, blockedId: string) {
-        return await db.delete(blocks)
-            .where(and(eq(blocks.blockerId, blockerId), eq(blocks.blockedId, blockedId)));
-    }
-
-    /**
-     * Lean Sidebar Fetcher
-     * Handles complex "View Logic" (Frozen Snapshots / Blackouts).
-     */
-    async getSidebarUsers(currentUserId: string) {
-        if (!currentUserId) return []; // Defensive check
-
-        // Query explicit junction table with nested relations
-        const userConversations = await db.query.conversationParticipants.findMany({
-            where: eq(conversationParticipants.userId, currentUserId),
-            with: {
-                conversation: {
-                    with: {
-                        messages: {
-                            orderBy: desc(messages.createdAt),
-                            limit: 1,
-                        },
-                        participants: {
-                            with: {
-                                user: {
-                                    with: {
-                                        blockedBy: { where: eq(blocks.blockerId, currentUserId) },
-                                        blockedUsers: { where: eq(blocks.blockedId, currentUserId) }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        });
-
-        return userConversations.map(cp => {
-            const conv = cp.conversation;
-            if (!conv) return null;
-
-            const otherParticipant = conv.participants.find(p => p.userId !== currentUserId);
-            if (!otherParticipant) return null;
-
-            const user = otherParticipant.user;
-            // ✅ FIX: Critical Check. If user relation failed, return null to avoid crash.
-            if (!user) return null;
-
-            const lastMsg = conv.messages[0];
-            const unreadCount = 0; // Requires aggregation query for perfect count
-
-            // --- RELATIONSHIP LOGIC ---
-            // Because we filter inside the 'with', this array contains items ONLY if I blocked them
-            const iBlockedThemBlock = user.blockedBy ? user.blockedBy[0] : undefined;
-            const iBlockedThem = !!iBlockedThemBlock;
-
-            const theyBlockedMe = user.blockedUsers ? user.blockedUsers.length > 0 : false;
-            const isStatusHidden = iBlockedThem || theyBlockedMe;
-
-            // --- IMAGE / ABOUT RESOLUTION ---
-            let finalImage = user.image;
-            let finalAbout = user.about;
-
-            // CASE 1: They Blocked Me -> Total Blackout
-            if (theyBlockedMe) {
-                finalImage = null;
-                finalAbout = null;
-            }
-            // CASE 2: I Blocked Them -> Frozen Snapshot
-            else if (iBlockedThem) {
-                const snapshot = iBlockedThemBlock.frozenPayload as any;
-                if (snapshot) {
-                    finalImage = snapshot.image || null;
-                    finalAbout = snapshot.about || null;
-                }
-            }
-            // CASE 3: Private Account
-            else if (user.isPrivate) {
-                finalAbout = null;
+            if (!user) {
+                throw new AppError('User no longer exists', 401);
             }
 
-            // --- MESSAGE PREVIEW ---
-            let previewText = lastMsg?.content || "Media message";
-            if (lastMsg?.messageType === 'IMAGE') previewText = "📷 Image";
-            if (lastMsg?.messageType === 'VIDEO') previewText = "🎥 Video";
-            if (lastMsg && lastMsg.authorId === currentUserId) previewText = `You: ${previewText}`;
-            if (lastMsg && lastMsg.isDeleted) previewText = "Message deleted";
+            // 3. Generate a NEW Access Token
+            const newAccessToken = generateAccessToken({ id: user.id, username: user.username });
 
-            return {
-                id: user.id,
-                username: user.username,
-                image: finalImage,
-                about: finalAbout,
-                email: (theyBlockedMe || iBlockedThem || user.isPrivate) ? null : user.email,
-                isOnline: isStatusHidden ? false : user.isOnline,
-                lastSeen: isStatusHidden ? new Date(0) : user.lastSeen,
-                isPrivate: user.isPrivate,
-                lastMessage: previewText,
-                lastActivity: lastMsg?.createdAt || conv.updatedAt,
-                unreadCount,
-                hasBlocked: iBlockedThem,
-                isBlockedBy: theyBlockedMe
-            };
-        })
-            .filter(Boolean)
-            .sort((a: any, b: any) => {
-                // Safe Date sorting
-                const dateA = new Date(a.lastActivity).getTime();
-                const dateB = new Date(b.lastActivity).getTime();
-                return dateB - dateA;
-            });
-    }
-
-    /**
-     * Search Users:
-     * - Must NOT show users who blocked me.
-     * - Respects privacy settings.
-     */
-    async searchUsers(query: string, currentUserId: string) {
-        if (!currentUserId) return [];
-
-        const foundUsers = await db.query.users.findMany({
-            where: and(
-                ne(users.id, currentUserId),
-                or(
-                    like(users.username, `%${query}%`),
-                    like(users.email, `%${query}%`)
-                )
-            ),
-            limit: 20,
-            with: {
-                blockedBy: { where: eq(blocks.blockerId, currentUserId) },
-                blockedUsers: { where: eq(blocks.blockedId, currentUserId) }
-            }
-        });
-
-        // Filter out those who blocked me
-        return foundUsers
-            .filter(u => u.blockedUsers.length === 0)
-            .map(user => {
-                const iBlockedThemBlock = user.blockedBy[0];
-                let displayImage = user.image;
-                let displayAbout = user.about;
-
-                if (iBlockedThemBlock && iBlockedThemBlock.frozenPayload) {
-                    const snap = iBlockedThemBlock.frozenPayload as any;
-                    displayImage = snap.image;
-                    displayAbout = snap.about;
-                }
-
-                if (user.isPrivate) {
-                    displayAbout = null;
-                }
-
-                return {
-                    id: user.id,
-                    username: user.username,
-                    image: displayImage,
-                    isPrivate: user.isPrivate,
-                    isOnline: (user.isPrivate || iBlockedThemBlock) ? false : user.isOnline,
-                    lastSeen: (user.isPrivate || iBlockedThemBlock) ? null : user.lastSeen,
-                    about: displayAbout
-                };
-            });
+            return { accessToken: newAccessToken, user };
+        } catch (error) {
+            throw new AppError('Invalid or expired refresh token', 401);
+        }
     }
 }
 
-export const userService = new UserService();
+export const authService = new AuthService();
