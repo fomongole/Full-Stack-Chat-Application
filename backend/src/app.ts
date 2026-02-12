@@ -4,6 +4,7 @@ import authRoutes from './routes/auth.routes';
 import userRoutes from './routes/user.routes';
 import { globalErrorHandler } from './middlewares/error.middleware';
 import { notFoundMiddleware } from './middlewares/not-found.middleware';
+import cookieParser from "cookie-parser";
 
 const app = express();
 
@@ -15,6 +16,7 @@ app.use(cors({
     credentials: true
 }));
 app.use(express.json());
+app.use(cookieParser());
 
 // Routes
 app.use('/api/v1/auth', authRoutes);

@@ -1,7 +1,9 @@
 import { prisma } from '../config/prisma';
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import { env } from '../config/env';
 import { AppError } from '../utils/app.error';
-import { generateToken } from '../utils/token.util';
+import { generateAccessToken, generateRefreshToken } from '../utils/token.util';
 
 export class AuthService {
     private async generateUniqueUsername(baseEmail: string): Promise<string> {
@@ -44,8 +46,10 @@ export class AuthService {
             }
         });
 
-        const token = generateToken({ id: user.id, username: user.username });
-        return { token, user };
+        const accessToken = generateAccessToken({ id: user.id, username: user.username });
+        const refreshToken = generateRefreshToken({ id: user.id, username: user.username });
+
+        return { accessToken, refreshToken, user };
     }
 
     async login(credentials: any) {
@@ -55,11 +59,37 @@ export class AuthService {
             throw new AppError('Invalid email or password', 401);
         }
 
-        // Update to online immediately on login (optional redundancy)
+        // Update to online immediately on login
         await prisma.user.update({ where: { id: user.id }, data: { isOnline: true }});
 
-        const token = generateToken({ id: user.id, username: user.username });
-        return { token, user };
+        // Generate BOTH tokens
+        const accessToken = generateAccessToken({ id: user.id, username: user.username });
+        const refreshToken = generateRefreshToken({ id: user.id, username: user.username });
+
+        return { accessToken, refreshToken, user };
+    }
+
+    /**
+     * Verifies the Refresh Token and issues a new Access Token
+     */
+    async refreshToken(token: string) {
+        try {
+            // 1. Verify the refresh token
+            const decoded = jwt.verify(token, env.JWT_SECRET) as { id: string; username: string };
+
+            // 2. Check if user still exists (Security Check)
+            const user = await prisma.user.findUnique({ where: { id: decoded.id } });
+            if (!user) {
+                throw new AppError('User no longer exists', 401);
+            }
+
+            // 3. Generate a NEW Access Token
+            const newAccessToken = generateAccessToken({ id: user.id, username: user.username });
+
+            return { accessToken: newAccessToken, user };
+        } catch (error) {
+            throw new AppError('Invalid or expired refresh token', 401);
+        }
     }
 }
 

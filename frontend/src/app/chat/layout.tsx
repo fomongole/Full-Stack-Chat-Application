@@ -1,36 +1,34 @@
 'use client';
 import React, { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { useAuthStore } from '@/store/useAuthStore';
 import { useChatStore } from '@/store/useChatStore';
-import { useSocket } from '@/hooks/useSocket';
 import { useChatList } from '@/hooks/chat/sidebar/useChatList';
+import { useRelationshipEvents } from '@/hooks/useRelationshipEvents';
+import { useLogout } from '@/hooks/auth/useLogout';
 import { User } from '@/types';
+
+// Components
 import ChatSidebar from '@/components/chat/ChatSidebar';
 import EditProfileModal from '@/components/modals/EditProfileModal';
 import LogoutModal from '@/components/modals/LogoutModal';
 import UserProfileModal from '@/components/modals/UserProfileModal';
-import { useRelationshipEvents } from '@/hooks/useRelationshipEvents';
 
 export default function ChatLayout({ children }: { children: React.ReactNode }) {
-    const { users, isLoading } = useChatList();
+    // 1. Data Hooks
+    const { users, isLoading: isChatListLoading } = useChatList();
+
+    // 2. Store Hooks
     const activeUser = useChatStore((state) => state.activeUser);
+
+    // 3. Logic Hooks
+    const { logout, isLoading: isLoggingOut } = useLogout();
+
+    // 4. Event Listeners
+    useRelationshipEvents();
+
+    // 5. Local UI State
     const [isProfileOpen, setIsProfileOpen] = useState(false);
     const [isLogoutOpen, setIsLogoutOpen] = useState(false);
     const [viewingUser, setViewingUser] = useState<User | null>(null);
-
-    const { logout } = useAuthStore();
-    const router = useRouter();
-    const socket = useSocket();
-
-    // Initialize the relationship listener
-    useRelationshipEvents();
-
-    const handleLogout = () => {
-        logout();
-        if (socket) socket.disconnect();
-        router.replace('/login');
-    };
 
     return (
         <div className="fixed inset-0 h-[100dvh] w-full flex overflow-hidden bg-white dark:bg-black touch-none overscroll-none">
@@ -42,7 +40,7 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
             `}>
                 <ChatSidebar
                     users={users}
-                    isLoading={isLoading}
+                    isLoading={isChatListLoading}
                     onProfileClick={() => setIsProfileOpen(true)}
                     onLogoutClick={() => setIsLogoutOpen(true)}
                     onViewUser={(user) => setViewingUser(user)}
@@ -57,10 +55,24 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
                 {children}
             </main>
 
-            {/* Modals */}
-            <EditProfileModal isOpen={isProfileOpen} onClose={() => setIsProfileOpen(false)} />
-            <UserProfileModal isOpen={!!viewingUser} user={viewingUser} onClose={() => setViewingUser(null)} />
-            <LogoutModal isOpen={isLogoutOpen} onClose={() => setIsLogoutOpen(false)} onConfirm={handleLogout} />
+            {/* MODALS */}
+            <EditProfileModal
+                isOpen={isProfileOpen}
+                onClose={() => setIsProfileOpen(false)}
+            />
+
+            <UserProfileModal
+                isOpen={!!viewingUser}
+                user={viewingUser}
+                onClose={() => setViewingUser(null)}
+            />
+
+            <LogoutModal
+                isOpen={isLogoutOpen}
+                onClose={() => setIsLogoutOpen(false)}
+                onConfirm={logout}
+                isLoading={isLoggingOut}
+            />
         </div>
     );
 }
