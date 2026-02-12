@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { User } from '@/types';
 
 /**
@@ -9,6 +9,7 @@ import { User } from '@/types';
 export const useUserState = () => {
     const [rawUsers, setRawUsers] = useState<User[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
 
     /**
      * Sorted and deduplicated user list
@@ -37,6 +38,7 @@ export const useUserState = () => {
     const setUsers = useCallback((users: User[]) => {
         setRawUsers(users);
         setIsLoading(false);
+        setError(null);
     }, []);
 
     /**
@@ -44,6 +46,14 @@ export const useUserState = () => {
      */
     const startLoading = useCallback(() => {
         setIsLoading(true);
+        setError(null);
+    }, []);
+
+    /**
+     * Stop loading state (used for errors)
+     */
+    const stopLoading = useCallback(() => {
+        setIsLoading(false);
     }, []);
 
     /**
@@ -125,8 +135,11 @@ export const useUserState = () => {
         users,
         rawUsers,
         isLoading,
+        error,
+        setError,
         setUsers,
         startLoading,
+        stopLoading,
         updateUserStatus,
         updateUser,
         setUserTyping,

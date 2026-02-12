@@ -35,8 +35,11 @@ export const useChatList = ({
         users,
         rawUsers,
         isLoading,
+        error,
+        setError,
         setUsers,
         startLoading,
+        stopLoading,
         updateUserStatus,
         updateUser,
         setUserTyping,
@@ -52,7 +55,9 @@ export const useChatList = ({
     // 2. API CALLS
     const { fetchUsers } = useUserApi({
         onUsersLoaded: setUsers,
+        onError: () => setError("Failed to load conversations"),
         startLoading,
+        stopLoading,
         shouldShowInitialLoader: usersRef.current.length === 0,
     });
 
@@ -185,6 +190,7 @@ export const useChatList = ({
     return {
         users,
         isLoading,
+        error,
         fetchUsers,
     };
 };

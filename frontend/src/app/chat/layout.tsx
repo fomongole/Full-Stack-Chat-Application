@@ -14,7 +14,12 @@ import UserProfileModal from '@/components/modals/UserProfileModal';
 
 export default function ChatLayout({ children }: { children: React.ReactNode }) {
     // 1. Data Hooks
-    const { users, isLoading: isChatListLoading } = useChatList();
+    const {
+        users,
+        isLoading: isChatListLoading,
+        error: chatListError,
+        fetchUsers
+    } = useChatList();
 
     // 2. Store Hooks
     const activeUser = useChatStore((state) => state.activeUser);
@@ -41,6 +46,8 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
                 <ChatSidebar
                     users={users}
                     isLoading={isChatListLoading}
+                    error={chatListError} // ✅ Pass error
+                    onRetry={fetchUsers} // ✅ Pass retry action
                     onProfileClick={() => setIsProfileOpen(true)}
                     onLogoutClick={() => setIsLogoutOpen(true)}
                     onViewUser={(user) => setViewingUser(user)}

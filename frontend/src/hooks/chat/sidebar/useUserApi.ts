@@ -6,6 +6,7 @@ interface UseUserApiProps {
     onUsersLoaded: (users: User[]) => void;
     onError?: (error: any) => void;
     startLoading: () => void;
+    stopLoading: () => void;
     shouldShowInitialLoader: boolean;
 }
 
@@ -18,6 +19,7 @@ export const useUserApi = ({
                                onUsersLoaded,
                                onError,
                                startLoading,
+                               stopLoading,
                                shouldShowInitialLoader,
                            }: UseUserApiProps) => {
     const hasLoadedRef = useRef(false);
@@ -39,9 +41,10 @@ export const useUserApi = ({
             hasLoadedRef.current = true;
         } catch (error) {
             console.error('Failed to load users:', error);
+            stopLoading(); // ✅ FIX: Ensure loading state is turned off on error
             onError?.(error);
         }
-    }, [onUsersLoaded, onError, startLoading, shouldShowInitialLoader]);
+    }, [onUsersLoaded, onError, startLoading, stopLoading, shouldShowInitialLoader]);
 
     /**
      * Initial fetch on mount

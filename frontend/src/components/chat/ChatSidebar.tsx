@@ -6,11 +6,13 @@ import { useUserSearch } from '@/hooks/chat/sidebar/useUserSearch';
 import { SidebarHeader } from './sidebar/SidebarHeader';
 import { SidebarUserItem } from './sidebar/SidebarUserItem';
 import { SidebarFooter } from './sidebar/SidebarFooter';
-import { UserPlus, Search } from 'lucide-react';
+import { UserPlus, Search, AlertCircle, RefreshCcw } from 'lucide-react';
 
 interface ChatSidebarProps {
     users: User[];
     isLoading?: boolean;
+    error?: string | null;
+    onRetry?: () => void;
     onProfileClick: () => void;
     onLogoutClick: () => void;
     onViewUser: (user: User) => void;
@@ -18,15 +20,12 @@ interface ChatSidebarProps {
 
 /**
  * Refactored ChatSidebar component.
- *
- * Improvements:
- * - Search logic extracted to useUserSearch hook
- * - No direct API calls in component
- * - Cleaner, more focused
  */
 export default function ChatSidebar({
                                         users,
                                         isLoading,
+                                        error,
+                                        onRetry,
                                         onProfileClick,
                                         onLogoutClick,
                                         onViewUser,
@@ -50,8 +49,25 @@ export default function ChatSidebar({
                     {searchQuery ? 'Search Results' : 'Direct Messages'}
                 </p>
 
-                {/* LOADING STATE */}
-                {isLoading && !searchQuery ? (
+                {/* ERROR STATE - PRIORITIZED */}
+                {error ? (
+                    <div className="flex flex-col items-center justify-center pt-10 pb-6 px-4 text-center">
+                        <div className="p-3 bg-red-100 dark:bg-red-900/20 rounded-full mb-3">
+                            <AlertCircle className="w-6 h-6 text-red-500" />
+                        </div>
+                        <p className="text-sm text-zinc-500 mb-4">{error}</p>
+                        {onRetry && (
+                            <button
+                                onClick={onRetry}
+                                className="flex items-center gap-2 text-xs font-medium text-primary hover:underline"
+                            >
+                                <RefreshCcw className="w-3 h-3" />
+                                Retry
+                            </button>
+                        )}
+                    </div>
+                ) : isLoading && !searchQuery ? (
+                    /* LOADING STATE */
                     [...Array(5)].map((_, i) => (
                         <div
                             key={i}
@@ -108,7 +124,6 @@ function EmptyState({
     }
 
     if (searchQuery) {
-        // Search returned no results
         return (
             <div className="flex flex-col items-center justify-center pt-10 pb-6 px-4 text-center opacity-70">
                 <div className="space-y-3 animate-in fade-in zoom-in duration-300">
@@ -124,7 +139,6 @@ function EmptyState({
         );
     }
 
-    // New user with no chats yet
     return (
         <div className="flex flex-col items-center justify-center pt-10 pb-6 px-4 text-center">
             <div className="flex flex-col items-center gap-3 animate-in fade-in slide-in-from-bottom-2 duration-500">
