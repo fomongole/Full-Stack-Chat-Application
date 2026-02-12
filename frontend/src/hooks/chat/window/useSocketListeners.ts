@@ -13,12 +13,14 @@ interface UseSocketListenersProps {
     onUserTyping: (data: { userId: string }) => void;
     onUserStopTyping: (data: { userId: string }) => void;
     onMessagesRead: (data: { conversationId: string; readerId: string }) => void;
+    onMessageError: (data: { message: string }) => void;
+    onSocketError: (data: { message: string }) => void;
 }
 
 /**
  * Pure socket listener orchestration hook.
  * Responsible ONLY for socket lifecycle, joining, and event delegation.
- * No emitters here.
+ * * Added Error Listeners for robust feedback.
  */
 export const useSocketListeners = ({
                                        socket,
@@ -31,6 +33,8 @@ export const useSocketListeners = ({
                                        onUserTyping,
                                        onUserStopTyping,
                                        onMessagesRead,
+                                       onMessageError,
+                                       onSocketError,
                                    }: UseSocketListenersProps) => {
     useEffect(() => {
         if (!socket || !activeUserId) return;
@@ -48,6 +52,10 @@ export const useSocketListeners = ({
         socket.on('user_stop_typing', onUserStopTyping);
         socket.on('messages_read', onMessagesRead);
 
+        // Error Events
+        socket.on('message_error', onMessageError);
+        socket.on('error', onSocketError);
+
         return () => {
             socket.off('conversation_joined', onConversationJoined);
             socket.off('load_history', onHistoryLoaded);
@@ -57,6 +65,8 @@ export const useSocketListeners = ({
             socket.off('user_typing', onUserTyping);
             socket.off('user_stop_typing', onUserStopTyping);
             socket.off('messages_read', onMessagesRead);
+            socket.off('message_error', onMessageError);
+            socket.off('error', onSocketError);
         };
     }, [
         socket,
@@ -69,5 +79,7 @@ export const useSocketListeners = ({
         onUserTyping,
         onUserStopTyping,
         onMessagesRead,
+        onMessageError,
+        onSocketError
     ]);
 };

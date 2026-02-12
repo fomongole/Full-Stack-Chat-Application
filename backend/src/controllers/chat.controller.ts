@@ -1,8 +1,10 @@
 import { Server, Socket } from 'socket.io';
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { chatService } from '../services/chat.service';
 import { catchAsync } from '../utils/catch.async';
-import { prisma } from '../config/prisma';
+import { db } from '../config/db';
+import { users } from '../db/schema';
+import { eq } from 'drizzle-orm';
 import cloudinary from '../config/cloudinary';
 import { AppError } from '../utils/app.error';
 
@@ -28,7 +30,7 @@ export const uploadMedia = catchAsync(async (req: any, res: Response) => {
     });
 });
 
-// --- SOCKET HANDLERS ---
+// --- SOCKET HANDLERS  ---
 export const registerChatHandlers = (io: Server, socket: Socket) => {
     const user = (socket as any).user;
 
@@ -38,15 +40,14 @@ export const registerChatHandlers = (io: Server, socket: Socket) => {
             socket.join(conversation.id);
             socket.emit("conversation_joined", { conversationId: conversation.id });
 
-            // Initial History Fetch (Top 50 latest)
             const historyData = await chatService.getConversationHistory(conversation.id);
             socket.emit("load_history", historyData);
         } catch (error) {
             console.error("Join Error:", error);
+            socket.emit("error", { message: "Failed to join conversation" });
         }
     });
 
-    // Handle fetching older messages via cursor
     socket.on("load_more_messages", async (data: { conversationId: string, cursor: string }) => {
         try {
             const historyData = await chatService.getConversationHistory(data.conversationId, 50, data.cursor);
@@ -56,7 +57,7 @@ export const registerChatHandlers = (io: Server, socket: Socket) => {
         }
     });
 
-    const handlePrivateMessage = catchAsync(async (data: {
+    const handlePrivateMessage = async (data: {
         conversationId: string,
         message: string,
         replyToId?: string,
@@ -84,8 +85,7 @@ export const registerChatHandlers = (io: Server, socket: Socket) => {
             if (msgType === 'IMAGE') previewText = data.message ? `📷 ${data.message}` : '📷 Image';
             else if (msgType === 'VIDEO') previewText = data.message ? `🎥 ${data.message}` : '🎥 Video';
 
-            // 2. Parallel Sidebar Updates (Promise.all optional here as emit is synchronous-like in memory,
-            // but good for future scalability if using adapters)
+            // 2. Notifications
             const recipientNotification = {
                 conversationId: data.conversationId,
                 senderId: user.id,
@@ -100,28 +100,40 @@ export const registerChatHandlers = (io: Server, socket: Socket) => {
                 isOwn: true
             };
 
-            // Emit to rooms
             io.to(data.recipientId).emit("new_message_notification", recipientNotification);
             io.to(user.id).emit("new_message_notification", senderNotification);
 
         } catch (error: any) {
+            // Emitting error back to client so they can remove the "Optimistic" message
             socket.emit("message_error", { message: error.message });
         }
-    });
+    };
 
-    const handleMarkAsRead = catchAsync(async (data: { conversationId: string, recipientId: string }) => {
-        await chatService.markMessagesAsRead(data.conversationId, user.id);
+    const handleMarkAsRead = async (data: { conversationId: string, recipientId: string }) => {
+        try {
+            await chatService.markMessagesAsRead(data.conversationId, user.id);
 
-        const me = await prisma.user.findUnique({ where: { id: user.id }, select: { isPrivate: true } });
-        if (me && me.isPrivate) return;
+            const me = await db.query.users.findFirst({
+                where: eq(users.id, user.id),
+                columns: { isPrivate: true }
+            });
 
-        io.to(data.recipientId).emit("messages_read", { conversationId: data.conversationId, readerId: user.id });
-    });
+            if (me && me.isPrivate) return;
 
-    const handleDeleteMessage = catchAsync(async (data: { conversationId: string, messageId: string }) => {
-        const deletedMessage = await chatService.deleteMessage(user.id, data.messageId);
-        io.to(data.conversationId).emit("message_deleted", deletedMessage);
-    });
+            io.to(data.recipientId).emit("messages_read", { conversationId: data.conversationId, readerId: user.id });
+        } catch (error) {
+            console.error("Mark Read Error:", error);
+        }
+    };
+
+    const handleDeleteMessage = async (data: { conversationId: string, messageId: string }) => {
+        try {
+            const deletedMessage = await chatService.deleteMessage(user.id, data.messageId);
+            io.to(data.conversationId).emit("message_deleted", deletedMessage);
+        } catch (error: any) {
+            socket.emit("message_error", { message: "Failed to delete message" });
+        }
+    };
 
     socket.on("typing", (data: { conversationId: string, recipientId: string }) => {
         socket.to(data.recipientId).emit("user_typing", { userId: user.id, conversationId: data.conversationId });

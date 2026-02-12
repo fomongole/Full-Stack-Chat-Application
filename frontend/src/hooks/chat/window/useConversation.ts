@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useSocket } from '@/hooks/useSocket';
 import { useAuthStore } from '@/store/useAuthStore';
 import { Message, User } from '@/types';
+import { toast } from 'sonner';
 import { useMessageState } from './useMessageState';
 import { useSocketEmitters } from './useSocketEmitters';
 import { useSocketListeners } from './useSocketListeners';
@@ -12,7 +13,7 @@ import { useScrollBehavior } from './useScrollBehavior';
  * Refactored useConversation hook.
  * Now a clean facade that composes smaller, focused hooks.
  * Each concern is properly separated and testable.
- * * ENTERPRISE UPDATE: Enforces Block Logic on incoming events.
+ * * Enforces Block Logic & Error Handling.
  */
 export const useConversation = (activeUser: User | null) => {
     const socket = useSocket();
@@ -108,6 +109,11 @@ export const useConversation = (activeUser: User | null) => {
         handleUserTyping(data);
     }, [handleUserTyping]);
 
+    // Error Handlers
+    const handleSocketError = useCallback((data: { message: string }) => {
+        toast.error(data.message || 'An unexpected error occurred');
+    }, []);
+
     // 2. SOCKET EVENT ORCHESTRATION
     useSocketListeners({
         socket,
@@ -120,6 +126,8 @@ export const useConversation = (activeUser: User | null) => {
         onUserTyping: onUserTypingWrapper,
         onUserStopTyping: handleUserStopTyping,
         onMessagesRead: handleMessagesRead,
+        onMessageError: handleSocketError,
+        onSocketError: handleSocketError,
     });
 
     // 3. SCROLL BEHAVIOR

@@ -1,6 +1,8 @@
-import { prisma } from '../config/prisma';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { eq } from 'drizzle-orm';
+import { db } from '../config/db';
+import { users } from '../db/schema';
 import { env } from '../config/env';
 import { AppError } from '../utils/app.error';
 import { generateAccessToken, generateRefreshToken } from '../utils/token.util';
@@ -12,7 +14,9 @@ export class AuthService {
         let finalUsername = prefix;
 
         while (!isUnique) {
-            const existing = await prisma.user.findUnique({ where: { username: finalUsername } });
+            const existing = await db.query.users.findFirst({
+                where: eq(users.username, finalUsername)
+            });
             if (!existing) {
                 isUnique = true;
             } else {
@@ -23,44 +27,50 @@ export class AuthService {
     }
 
     async register(userData: any) {
-        const existingEmail = await prisma.user.findUnique({ where: { email: userData.email } });
+        const existingEmail = await db.query.users.findFirst({
+            where: eq(users.email, userData.email)
+        });
         if (existingEmail) throw new AppError('User with this email already exists', 400);
 
         let username = userData.username;
         if (!username) {
             username = await this.generateUniqueUsername(userData.email);
         } else {
-            const existingUser = await prisma.user.findUnique({ where: { username } });
+            const existingUser = await db.query.users.findFirst({
+                where: eq(users.username, username)
+            });
             if (existingUser) throw new AppError('Username is already taken', 400);
         }
 
         const hashedPassword = await bcrypt.hash(userData.password, 12);
 
-        const user = await prisma.user.create({
-            data: {
-                email: userData.email,
-                username: username,
-                password: hashedPassword,
-                image: userData.image || null,
-                about: userData.about || "Hey there! I'm using Chat App."
-            }
-        });
+        const [newUser] = await db.insert(users).values({
+            email: userData.email,
+            username: username,
+            password: hashedPassword,
+            image: userData.image || null,
+            about: userData.about || "Hey there! I'm using Chat App."
+        }).returning();
 
-        const accessToken = generateAccessToken({ id: user.id, username: user.username });
-        const refreshToken = generateRefreshToken({ id: user.id, username: user.username });
+        const accessToken = generateAccessToken({ id: newUser.id, username: newUser.username });
+        const refreshToken = generateRefreshToken({ id: newUser.id, username: newUser.username });
 
-        return { accessToken, refreshToken, user };
+        return { accessToken, refreshToken, user: newUser };
     }
 
     async login(credentials: any) {
-        const user = await prisma.user.findUnique({ where: { email: credentials.email } });
+        const user = await db.query.users.findFirst({
+            where: eq(users.email, credentials.email)
+        });
 
         if (!user || !(await bcrypt.compare(credentials.password, user.password))) {
             throw new AppError('Invalid email or password', 401);
         }
 
         // Update to online immediately on login
-        await prisma.user.update({ where: { id: user.id }, data: { isOnline: true }});
+        await db.update(users)
+            .set({ isOnline: true })
+            .where(eq(users.id, user.id));
 
         // Generate BOTH tokens
         const accessToken = generateAccessToken({ id: user.id, username: user.username });
@@ -78,7 +88,8 @@ export class AuthService {
             const decoded = jwt.verify(token, env.JWT_SECRET) as { id: string; username: string };
 
             // 2. Check if user still exists (Security Check)
-            const user = await prisma.user.findUnique({ where: { id: decoded.id } });
+            const user = await db.query.users.findFirst({ where: eq(users.id, decoded.id) });
+
             if (!user) {
                 throw new AppError('User no longer exists', 401);
             }

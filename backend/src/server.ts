@@ -4,13 +4,25 @@ import app from './app';
 import { env } from './config/env';
 import { registerChatHandlers } from './controllers/chat.controller';
 import { authMiddleware } from './middlewares/auth.middleware';
-import { prisma } from './config/prisma';
+import { db } from './config/db';
+import { users } from './db/schema';
+import { eq } from 'drizzle-orm';
 
 const httpServer = http.createServer(app);
 
-// Initializing Socket.io with CORS allowing all origins
+/**
+ * Socket.io Server Initialization
+ * Configured with CORS to allow connections from your frontend domains.
+ */
 const io = new Server(httpServer, {
-    cors: { origin: "*" }
+    cors: {
+        origin: [
+            "https://full-stack-chat-application-pi.vercel.app",
+            "https://fred-chat-app.vercel.app",
+            "http://localhost:3000"
+        ],
+        methods: ["GET", "POST"]
+    }
 });
 
 /**
@@ -25,55 +37,56 @@ app.set('io', io);
 io.use(authMiddleware);
 
 io.on("connection", async (socket) => {
-    // User is attached to socket in authMiddleware
+    // User is attached to socket in authMiddleware via JWT decoding
     const userId = (socket as any).user.id;
 
     /**
      * Personal Notification Channel
      * We join a room named after the User's ID.
-     * This allows us to target this specific user from anywhere in the app
-     * (e.g., "io.to(recipientId).emit(...)") even if we don't know their socket ID.
      * Used for: Sidebar updates, Unread badges, Incoming calls.
      */
     socket.join(userId);
 
     try {
-        // 1. Update DB status
-        await prisma.user.update({
-            where: { id: userId },
-            data: { isOnline: true }
-        });
+        // 1. Update DB status to ONLINE
+        await db.update(users)
+            .set({ isOnline: true })
+            .where(eq(users.id, userId));
 
         // 2. Broadcast to everyone else that this user is online
         socket.broadcast.emit("user_status_change", { userId, isOnline: true });
 
     } catch (error) {
-        console.error(`⚠️ Could not update user status:`);
-        socket.disconnect();
-        return;
+        console.error(`⚠️ Could not update user status for ${userId}:`, error);
+        // We don't disconnect here, as chat might still work even if status update fails
     }
 
-    // Register all chat-related event listeners
+    // Register all chat-related event listeners (Messaging, Typing, etc.)
     registerChatHandlers(io, socket);
 
+    /**
+     * Handle Disconnect
+     * Updates "Last Seen" timestamp and notifies others.
+     */
     socket.on("disconnect", async () => {
-        console.log(`🔌 Disconnected: ${socket.id}`);
+        console.log(`🔌 Disconnected: ${userId} (${socket.id})`);
 
         try {
             const lastSeen = new Date();
-            // Update DB status to offline with timestamp
-            await prisma.user.update({
-                where: { id: userId },
-                data: {
-                    isOnline: false,
-                    lastSeen: lastSeen
-                }
-            });
+
+            // Update DB status to OFFLINE with timestamp
+            await db.update(users)
+                .set({ isOnline: false, lastSeen: lastSeen })
+                .where(eq(users.id, userId));
 
             // Notify others for accurate "Last Seen" display
-            socket.broadcast.emit("user_status_change", { userId, isOnline: false, lastSeen });
+            socket.broadcast.emit("user_status_change", {
+                userId,
+                isOnline: false,
+                lastSeen
+            });
         } catch (error) {
-            // Silently fail if DB update fails on disconnect
+            console.error(`⚠️ Failed to update offline status for ${userId}`, error);
         }
     });
 });

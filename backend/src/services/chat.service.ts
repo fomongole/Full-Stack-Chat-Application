@@ -1,4 +1,6 @@
-import { prisma } from '../config/prisma';
+import { eq, and, or, desc, lt, ne } from 'drizzle-orm';
+import { db } from '../config/db';
+import { conversations, conversationParticipants, blocks, messages } from '../db/schema';
 import { AppError } from '../utils/app.error';
 
 interface SendMessageParams {
@@ -13,191 +15,155 @@ interface SendMessageParams {
 export class ChatService {
 
     async getOrCreateConversation(user1Id: string, user2Id: string) {
-        let conversation = await prisma.conversation.findFirst({
-            where: {
-                AND: [
-                    { participants: { some: { id: user1Id } } },
-                    { participants: { some: { id: user2Id } } }
-                ]
-            },
-            select: { id: true }
+        // Efficient check for existing conversation between two users via the junction table
+        const user1Convos = await db.query.conversationParticipants.findMany({
+            where: eq(conversationParticipants.userId, user1Id),
+            with: {
+                conversation: {
+                    with: {
+                        participants: {
+                            where: eq(conversationParticipants.userId, user2Id)
+                        }
+                    }
+                }
+            }
         });
 
-        if (!conversation) {
-            conversation = await prisma.conversation.create({
-                data: {
-                    participants: {
-                        connect: [{ id: user1Id }, { id: user2Id }]
-                    }
-                },
-                select: { id: true }
-            });
+        const existing = user1Convos.find(c => c.conversation.participants.length > 0);
+
+        if (existing) {
+            return existing.conversation;
         }
-        return conversation;
+
+        // Transactional creation of conversation and participants
+        return await db.transaction(async (tx) => {
+            const [newConv] = await tx.insert(conversations).values({}).returning();
+
+            await tx.insert(conversationParticipants).values([
+                { conversationId: newConv.id, userId: user1Id },
+                { conversationId: newConv.id, userId: user2Id }
+            ]);
+
+            return newConv;
+        });
     }
 
     async processPrivateMessage(params: SendMessageParams) {
         const { userId, conversationId, content, replyToId, attachmentUrl, messageType = 'TEXT' } = params;
 
         // 1. Fetch Conversation & Participants
-        const conversation = await prisma.conversation.findUnique({
-            where: { id: conversationId },
-            include: {
-                participants: {
-                    select: { id: true }
-                }
-            }
+        const participants = await db.query.conversationParticipants.findMany({
+            where: eq(conversationParticipants.conversationId, conversationId),
+            with: { user: true }
         });
 
-        if (!conversation) throw new AppError("Conversation not found", 404);
+        if (participants.length === 0) throw new AppError("Conversation not found", 404);
 
-        const recipient = conversation.participants.find(p => p.id !== userId);
+        const recipient = participants.find(p => p.userId !== userId)?.user;
 
         // 2. BLOCK CHECK (Bidirectional)
-        // If either party blocked the other, messages fail.
         if (recipient) {
-            const blockCount = await prisma.block.count({
-                where: {
-                    OR: [
-                        { blockerId: recipient.id, blockedId: userId }, // They blocked me
-                        { blockerId: userId, blockedId: recipient.id }  // I blocked them
-                    ]
-                }
+            const blockExists = await db.query.blocks.findFirst({
+                where: or(
+                    and(eq(blocks.blockerId, recipient.id), eq(blocks.blockedId, userId)),
+                    and(eq(blocks.blockerId, userId), eq(blocks.blockedId, recipient.id))
+                )
             });
 
-            if (blockCount > 0) {
-                // Return a generic error or silent fail.
-                // 403 Forbidden is appropriate.
+            if (blockExists) {
                 throw new AppError("Message cannot be sent. You are blocked or have blocked this user.", 403);
             }
         }
 
-        // 3. Create Message
-        const [newMessage] = await prisma.$transaction([
-            prisma.message.create({
-                data: {
-                    content: content || "",
-                    authorId: userId,
-                    conversationId: conversationId,
-                    messageType,
-                    attachmentUrl,
-                    replyToId: replyToId
-                },
-                select: {
-                    id: true,
-                    content: true,
-                    createdAt: true,
-                    isRead: true,
-                    isDeleted: true,
-                    messageType: true,
-                    attachmentUrl: true,
-                    conversationId: true,
-                    author: { select: { id: true, username: true, image: true } },
-                    replyTo: {
-                        select: {
-                            id: true,
-                            content: true,
-                            messageType: true,
-                            author: { select: { username: true } }
-                        }
-                    }
-                }
-            }),
-            prisma.conversation.update({
-                where: { id: conversationId },
-                data: { updatedAt: new Date() }
-            })
-        ]);
+        // 3. Create Message Transactionally
+        return await db.transaction(async (tx) => {
+            const [newMessage] = await tx.insert(messages).values({
+                content: content || "",
+                authorId: userId,
+                conversationId: conversationId,
+                messageType,
+                attachmentUrl,
+                replyToId: replyToId
+            }).returning();
 
-        return this.formatMessage(newMessage);
+            // Fetch fully populated message for return
+            const fullMessage = await tx.query.messages.findFirst({
+                where: eq(messages.id, newMessage.id),
+                with: {
+                    author: true,
+                    replyTo: { with: { author: true } }
+                }
+            });
+
+            await tx.update(conversations)
+                .set({ updatedAt: new Date() })
+                .where(eq(conversations.id, conversationId));
+
+            return this.formatMessage(fullMessage);
+        });
     }
 
     async deleteMessage(userId: string, messageId: string) {
-        const message = await prisma.message.findUnique({
-            where: { id: messageId },
-            select: { authorId: true }
+        const message = await db.query.messages.findFirst({
+            where: eq(messages.id, messageId)
         });
 
         if (!message) throw new AppError("Message not found", 404);
         if (message.authorId !== userId) throw new AppError("You can only delete your own messages", 403);
 
-        const deletedMessage = await prisma.message.update({
-            where: { id: messageId },
-            data: {
+        const [deletedMessage] = await db.update(messages)
+            .set({
                 isDeleted: true,
                 content: "This message was deleted",
                 attachmentUrl: null,
                 messageType: "TEXT"
-            },
-            select: {
-                id: true,
-                content: true,
-                createdAt: true,
-                isRead: true,
-                isDeleted: true,
-                messageType: true,
-                attachmentUrl: true,
-                conversationId: true,
-                author: { select: { id: true, username: true, image: true } },
-                replyTo: {
-                    select: {
-                        id: true,
-                        content: true,
-                        messageType: true,
-                        author: { select: { username: true } }
-                    }
-                }
-            }
+            })
+            .where(eq(messages.id, messageId))
+            .returning();
+
+        // Refetch to include relations for consistent formatting
+        const fullDeleted = await db.query.messages.findFirst({
+            where: eq(messages.id, messageId),
+            with: { author: true, replyTo: { with: { author: true } } }
         });
 
-        return this.formatMessage(deletedMessage);
+        return this.formatMessage(fullDeleted);
     }
 
     async getConversationHistory(conversationId: string, limit = 50, cursor?: string) {
-        const messages = await prisma.message.findMany({
-            where: { conversationId },
-            take: limit,
-            ...(cursor && { skip: 1, cursor: { id: cursor } }),
-            orderBy: { createdAt: 'desc' },
-            select: {
-                id: true,
-                content: true,
-                createdAt: true,
-                isRead: true,
-                isDeleted: true,
-                messageType: true,
-                attachmentUrl: true,
-                conversationId: true,
-                author: { select: { id: true, username: true, image: true } },
-                replyTo: {
-                    select: {
-                        id: true,
-                        content: true,
-                        messageType: true,
-                        author: { select: { username: true } }
-                    }
-                }
+        // Cursor pagination logic based on timestamp
+        const whereClause = cursor
+            ? and(eq(messages.conversationId, conversationId), lt(messages.createdAt, new Date(cursor)))
+            : eq(messages.conversationId, conversationId);
+
+        const msgs = await db.query.messages.findMany({
+            where: whereClause,
+            limit: limit,
+            orderBy: desc(messages.createdAt),
+            with: {
+                author: true,
+                replyTo: { with: { author: true } }
             }
         });
 
-        const formatted = messages.map(msg => this.formatMessage(msg)).reverse();
+        const formatted = msgs.map(msg => this.formatMessage(msg)).reverse();
 
         return {
             messages: formatted,
-            hasMore: messages.length === limit,
-            nextCursor: messages.length > 0 ? messages[messages.length - 1].id : null
+            hasMore: msgs.length === limit,
+            // Use timestamp as cursor for next page
+            nextCursor: msgs.length > 0 ? msgs[msgs.length - 1].createdAt.toISOString() : null
         };
     }
 
     async markMessagesAsRead(conversationId: string, currentUserId: string) {
-        await prisma.message.updateMany({
-            where: {
-                conversationId: conversationId,
-                isRead: false,
-                authorId: { not: currentUserId }
-            },
-            data: { isRead: true }
-        });
+        await db.update(messages)
+            .set({ isRead: true })
+            .where(and(
+                eq(messages.conversationId, conversationId),
+                eq(messages.isRead, false),
+                ne(messages.authorId, currentUserId)
+            ));
     }
 
     private formatMessage(msg: any) {
