@@ -95,6 +95,8 @@ export class UserService {
      * Handles complex "View Logic" (Frozen Snapshots / Blackouts).
      */
     async getSidebarUsers(currentUserId: string) {
+        if (!currentUserId) return [];
+
         // Query explicit junction table with nested relations
         const userConversations = await db.query.conversationParticipants.findMany({
             where: eq(conversationParticipants.userId, currentUserId),
@@ -122,17 +124,25 @@ export class UserService {
 
         return userConversations.map(cp => {
             const conv = cp.conversation;
+            if (!conv) return null; // Defensive check
+
             const otherParticipant = conv.participants.find(p => p.userId !== currentUserId);
             if (!otherParticipant) return null;
+
             const user = otherParticipant.user;
+            // ✅ CRITICAL FIX: Ensure user object exists before accessing its properties
+            // This prevents the 500 error if there's a data mismatch (orphaned participant)
+            if (!user) return null;
 
             const lastMsg = conv.messages[0];
-            const unreadCount = 0; // Requires aggregation query for perfect count
+            const unreadCount = 0;
 
             // --- RELATIONSHIP LOGIC ---
-            const iBlockedThemBlock = user.blockedBy[0];
+            // Arrays will be present but empty if no blocks exist. Safe access via [0] or length check.
+            const iBlockedThemBlock = user.blockedBy && user.blockedBy.length > 0 ? user.blockedBy[0] : undefined;
             const iBlockedThem = !!iBlockedThemBlock;
-            const theyBlockedMe = user.blockedUsers.length > 0;
+
+            const theyBlockedMe = user.blockedUsers && user.blockedUsers.length > 0;
             const isStatusHidden = iBlockedThem || theyBlockedMe;
 
             // --- IMAGE / ABOUT RESOLUTION ---
@@ -179,7 +189,13 @@ export class UserService {
                 hasBlocked: iBlockedThem,
                 isBlockedBy: theyBlockedMe
             };
-        }).filter(Boolean).sort((a: any, b: any) => b.lastActivity - a.lastActivity);
+        })
+            .filter(Boolean)
+            .sort((a: any, b: any) => {
+                const dateA = new Date(a.lastActivity || 0).getTime();
+                const dateB = new Date(b.lastActivity || 0).getTime();
+                return dateB - dateA;
+            });
     }
 
     /**
@@ -188,6 +204,8 @@ export class UserService {
      * - Respects privacy settings.
      */
     async searchUsers(query: string, currentUserId: string) {
+        if (!currentUserId) return [];
+
         const foundUsers = await db.query.users.findMany({
             where: and(
                 ne(users.id, currentUserId),

@@ -1,11 +1,17 @@
 import { Request, Response } from 'express';
 import { userService } from '../services/user.service';
 import { catchAsync } from '../utils/catch.async';
+import { AppError } from '../utils/app.error';
 
 /**
  * Updates the user's profile (Username, Image, About, Privacy).
  */
 export const updateProfile = catchAsync(async (req: any, res: Response) => {
+    // Safety Check: Ensure user is authenticated
+    if (!req.user || !req.user.id) {
+        throw new AppError('User not authenticated', 401);
+    }
+
     const updatedUser = await userService.updateProfile(
         req.user.id,
         {
@@ -34,6 +40,11 @@ export const updateProfile = catchAsync(async (req: any, res: Response) => {
 });
 
 export const getUsers = catchAsync(async (req: any, res: Response) => {
+    // Safety Check: Prevents 500 error if middleware fails to attach user
+    if (!req.user || !req.user.id) {
+        throw new AppError('User not authenticated', 401);
+    }
+
     // This function ALREADY enforces the Frozen Snapshot logic
     const users = await userService.getSidebarUsers(req.user.id);
 
@@ -44,6 +55,8 @@ export const getUsers = catchAsync(async (req: any, res: Response) => {
 });
 
 export const searchUsers = catchAsync(async (req: any, res: Response) => {
+    if (!req.user || !req.user.id) throw new AppError('User not authenticated', 401);
+
     const query = req.query.q as string;
 
     if (!query) {
@@ -59,6 +72,8 @@ export const searchUsers = catchAsync(async (req: any, res: Response) => {
 });
 
 export const blockUser = catchAsync(async (req: any, res: Response) => {
+    if (!req.user || !req.user.id) throw new AppError('User not authenticated', 401);
+
     const { userIdToBlock } = req.body;
     const currentUserId = req.user.id;
 
@@ -84,6 +99,8 @@ export const blockUser = catchAsync(async (req: any, res: Response) => {
 });
 
 export const unblockUser = catchAsync(async (req: any, res: Response) => {
+    if (!req.user || !req.user.id) throw new AppError('User not authenticated', 401);
+
     const { userIdToUnblock } = req.body;
     const currentUserId = req.user.id;
 
