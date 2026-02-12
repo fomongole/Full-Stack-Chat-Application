@@ -92,12 +92,15 @@ export class UserService {
 
     /**
      * Lean Sidebar Fetcher
-     * Handles complex "View Logic" (Frozen Snapshots / Blackouts).
+     * ARCHITECTURE CHANGE: Decoupled Logic (Performance Optimized)
+     * 1. Fetches raw conversations.
+     * 2. Fetches block relationships separately.
+     * 3. Merges in memory to avoid ORM Deep-Join Aliasing crashes.
      */
     async getSidebarUsers(currentUserId: string) {
         if (!currentUserId) return [];
 
-        // Query explicit junction table with nested relations
+        // 1. Fetch Conversations (Clean, no nested blocks join)
         const userConversations = await db.query.conversationParticipants.findMany({
             where: eq(conversationParticipants.userId, currentUserId),
             with: {
@@ -109,17 +112,7 @@ export class UserService {
                         },
                         participants: {
                             with: {
-                                user: {
-                                    with: {
-                                        // ✅ FIX: Use callback syntax (b) to reference the ALIASED table
-                                        blockedBy: {
-                                            where: (b, { eq }) => eq(b.blockerId, currentUserId)
-                                        },
-                                        blockedUsers: {
-                                            where: (b, { eq }) => eq(b.blockedId, currentUserId)
-                                        }
-                                    }
-                                }
+                                user: true // Fetch user details, but NOT the nested blocks here
                             }
                         }
                     }
@@ -127,27 +120,36 @@ export class UserService {
             }
         });
 
+        // 2. Fetch ALL relevant blocks for this user in one optimized query
+        const relationships = await db.query.blocks.findMany({
+            where: or(
+                eq(blocks.blockerId, currentUserId), // People I blocked
+                eq(blocks.blockedId, currentUserId)  // People who blocked me
+            )
+        });
+
         return userConversations.map(cp => {
             const conv = cp.conversation;
-            if (!conv) return null; // Defensive check
+            if (!conv) return null;
 
             const otherParticipant = conv.participants.find(p => p.userId !== currentUserId);
-            if (!otherParticipant) return null;
+            // Defensive Check: Ensure user exists (handles data inconsistency)
+            if (!otherParticipant?.user) return null;
 
             const user = otherParticipant.user;
-            // ✅ CRITICAL FIX: Ensure user object exists before accessing its properties
-            // This prevents the 500 error if there's a data mismatch (orphaned participant)
-            if (!user) return null;
-
             const lastMsg = conv.messages[0];
-            const unreadCount = 0;
+            const unreadCount = 0; // TODO: Implement real unread count logic if needed
 
-            // --- RELATIONSHIP LOGIC ---
-            // Arrays will be present but empty if no blocks exist. Safe access via [0] or length check.
-            const iBlockedThemBlock = user.blockedBy && user.blockedBy.length > 0 ? user.blockedBy[0] : undefined;
+            // --- IN-MEMORY RELATIONSHIP MAPPING ---
+            // Faster than SQL joins for small datasets (sidebar lists)
+            const iBlockedThemBlock = relationships.find(
+                b => b.blockerId === currentUserId && b.blockedId === user.id
+            );
+            const theyBlockedMe = relationships.some(
+                b => b.blockerId === user.id && b.blockedId === currentUserId
+            );
+
             const iBlockedThem = !!iBlockedThemBlock;
-
-            const theyBlockedMe = user.blockedUsers && user.blockedUsers.length > 0;
             const isStatusHidden = iBlockedThem || theyBlockedMe;
 
             // --- IMAGE / ABOUT RESOLUTION ---
@@ -161,7 +163,7 @@ export class UserService {
             }
             // CASE 2: I Blocked Them -> Frozen Snapshot
             else if (iBlockedThem) {
-                const snapshot = iBlockedThemBlock.frozenPayload as any;
+                const snapshot = iBlockedThemBlock?.frozenPayload as any;
                 if (snapshot) {
                     finalImage = snapshot.image || null;
                     finalAbout = snapshot.about || null;
@@ -204,13 +206,13 @@ export class UserService {
     }
 
     /**
-     * Search Users:
-     * - Must NOT show users who blocked me.
-     * - Respects privacy settings.
+     * Search Users
+     * Also refactored to use decoupled block fetching for stability.
      */
     async searchUsers(query: string, currentUserId: string) {
         if (!currentUserId) return [];
 
+        // 1. Perform Search
         const foundUsers = await db.query.users.findMany({
             where: and(
                 ne(users.id, currentUserId),
@@ -219,23 +221,25 @@ export class UserService {
                     like(users.email, `%${query}%`)
                 )
             ),
-            limit: 20,
-            with: {
-                // ✅ FIX: Applied same callback fix here for search consistency
-                blockedBy: {
-                    where: (b, { eq }) => eq(b.blockerId, currentUserId)
-                },
-                blockedUsers: {
-                    where: (b, { eq }) => eq(b.blockedId, currentUserId)
-                }
-            }
+            limit: 20
+            // Removed nested 'with' blocks relations to prevent crashes
         });
 
-        // Filter out those who blocked me
+        // 2. Fetch Blocks
+        const relationships = await db.query.blocks.findMany({
+            where: or(
+                eq(blocks.blockerId, currentUserId),
+                eq(blocks.blockedId, currentUserId)
+            )
+        });
+
+        // 3. Filter & Map
         return foundUsers
-            .filter(u => u.blockedUsers.length === 0)
+            // Filter out those who blocked me
+            .filter(user => !relationships.some(b => b.blockerId === user.id && b.blockedId === currentUserId))
             .map(user => {
-                const iBlockedThemBlock = user.blockedBy[0];
+                const iBlockedThemBlock = relationships.find(b => b.blockerId === currentUserId && b.blockedId === user.id);
+
                 let displayImage = user.image;
                 let displayAbout = user.about;
 
