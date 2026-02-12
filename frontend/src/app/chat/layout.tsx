@@ -46,8 +46,8 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
                 <ChatSidebar
                     users={users}
                     isLoading={isChatListLoading}
-                    error={chatListError} // ✅ Pass error
-                    onRetry={fetchUsers} // ✅ Pass retry action
+                    error={chatListError}
+                    onRetry={fetchUsers}
                     onProfileClick={() => setIsProfileOpen(true)}
                     onLogoutClick={() => setIsLogoutOpen(true)}
                     onViewUser={(user) => setViewingUser(user)}

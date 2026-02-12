@@ -12,13 +12,6 @@ interface UseChatListOptions {
     enableBackgroundSync?: boolean;
 }
 
-/**
- * Refactored useChatList hook.
- * Clean facade that composes specialized hooks.
- * * Responsibilities:
- * - Aggregates API, Socket, and State logic for the Sidebar.
- * - Enforces Block/Privacy logic on incoming socket events.
- */
 export const useChatList = ({
                                 enableUpdates = true,
                                 enableBackgroundSync = false,
@@ -27,10 +20,8 @@ export const useChatList = ({
     const setActiveUser = useChatStore((state) => state.setActiveUser);
     const selectedUser = useChatStore((state) => state.activeUser);
 
-    // Track users for synchronous access inside socket callbacks
     const usersRef = useRef<any[]>([]);
 
-    // 1. USER STATE MANAGEMENT
     const {
         users,
         rawUsers,
@@ -47,43 +38,76 @@ export const useChatList = ({
         resetUnreadCount,
     } = useUserState();
 
-    // Keep ref in sync for socket handlers
     useEffect(() => {
         usersRef.current = rawUsers;
     }, [rawUsers]);
 
-    // 2. API CALLS
+    // -------------------------------------------------------------------------
+    // 1. DATA SYNCHRONIZATION (Fixes Issue 3: Header not updating)
+    // -------------------------------------------------------------------------
+    // When the sidebar list updates (via API fetch), we MUST check if the
+    // currently active user's data has changed (e.g., they got blocked, image changed).
+    // If so, we sync the global store immediately.
+    useEffect(() => {
+        if (selectedUser && rawUsers.length > 0) {
+            const updatedActiveUser = rawUsers.find(u => u.id === selectedUser.id);
+
+            // If we found the user in the new list, and they look different from current state
+            if (updatedActiveUser) {
+                // We compare key fields to avoid infinite loops
+                const hasChanged =
+                    updatedActiveUser.image !== selectedUser.image ||
+                    updatedActiveUser.isOnline !== selectedUser.isOnline ||
+                    updatedActiveUser.lastSeen !== selectedUser.lastSeen ||
+                    updatedActiveUser.hasBlocked !== selectedUser.hasBlocked ||
+                    updatedActiveUser.isBlockedBy !== selectedUser.isBlockedBy;
+
+                if (hasChanged) {
+                    setActiveUser(updatedActiveUser);
+                }
+            }
+        }
+    }, [rawUsers, selectedUser, setActiveUser]);
+
+
+    // -------------------------------------------------------------------------
+    // 2. API CALLS & SANITIZATION (Fixes Issue 1: Unread Flash)
+    // -------------------------------------------------------------------------
     const { fetchUsers } = useUserApi({
-        onUsersLoaded: setUsers,
+        onUsersLoaded: (fetchedUsers) => {
+            // FIX: Sanitize unread count BEFORE setting state
+            // If we are currently looking at a user, their incoming unread count MUST be 0.
+            const sanitizedUsers = fetchedUsers.map(u => {
+                if (useChatStore.getState().activeUser?.id === u.id) {
+                    return { ...u, unreadCount: 0 };
+                }
+                return u;
+            });
+            setUsers(sanitizedUsers);
+        },
         onError: () => setError("Failed to load conversations"),
         startLoading,
         stopLoading,
         shouldShowInitialLoader: usersRef.current.length === 0,
     });
 
+    // -------------------------------------------------------------------------
     // 3. SOCKET EVENT HANDLERS
-
-    /**
-     * Handle Online/Offline status changes.
-     * STRICT ALIGNMENT: We must NOT update status if a block exists.
-     */
+    // -------------------------------------------------------------------------
     const handleStatusChange = useCallback(
         (data: { userId: string; isOnline: boolean; lastSeen: string }) => {
             const currentUserInList = usersRef.current.find(u => u.id === data.userId);
-
-            // SECURITY CHECK: If blocked/blocking, ignore status updates
             if (currentUserInList) {
                 const isBlocked = currentUserInList.hasBlocked || currentUserInList.isBlockedBy;
                 if (isBlocked) return;
             }
 
-            // Update in user list
             updateUserStatus(data.userId, {
                 isOnline: data.isOnline,
                 lastSeen: data.lastSeen,
             });
 
-            // Update active user if it's the same user
+            // Also update active user store if it's the current one
             if (selectedUser?.id === data.userId) {
                 const isBlocked = selectedUser.hasBlocked || selectedUser.isBlockedBy;
                 if (!isBlocked) {
@@ -100,13 +124,7 @@ export const useChatList = ({
 
     const handleUserUpdate = useCallback(
         (data: any) => {
-            // We generally trust the backend not to send sensitive data,
-            // but for "Frozen" logic, rely on the fact that if I blocked them,
-            // I shouldn't be receiving these updates anyway (backend filtering usually).
-            // Even if I do, the next sidebar refresh resets to the "Frozen" snapshot.
-
             updateUser(data.userId, data);
-
             if (selectedUser?.id === data.userId) {
                 setActiveUser({ ...selectedUser, ...data });
             }
@@ -117,9 +135,7 @@ export const useChatList = ({
     const handleTyping = useCallback(
         (data: { userId: string }) => {
             const user = usersRef.current.find(u => u.id === data.userId);
-            // Don't show typing indicator if blocked
             if (user && (user.hasBlocked || user.isBlockedBy)) return;
-
             setUserTyping(data.userId, true);
         },
         [setUserTyping]
@@ -139,15 +155,12 @@ export const useChatList = ({
             if (userExists) {
                 const isCurrentChat = selectedUser?.id === data.senderId;
                 const shouldIncrement = !data.isOwn && !isCurrentChat;
-
                 updateLastMessage(data.senderId, data.message, shouldIncrement);
             } else {
-                // New conversation started - fetch fresh list
                 await fetchUsers();
             }
 
             if (!data.isOwn && selectedUser?.id !== data.senderId) {
-                // Backend won't emit message event if blocked.
                 toast.info('New message received');
             }
         },
@@ -155,12 +168,11 @@ export const useChatList = ({
     );
 
     const handleRelationshipUpdate = useCallback(async () => {
-        // When block/unblock happens, re-fetch the whole list.
-        // This ensures the "Frozen Snapshot" or "Blackout" state is correctly loaded from the DB.
+        // Re-fetch list to get the "Frozen Snapshot" or "Blackout" data from backend
         await fetchUsers();
+        // The useEffect at the top will handle syncing this fresh data to the activeUser
     }, [fetchUsers]);
 
-    // 4. SOCKET EVENTS
     useUserSocket({
         socket,
         activeUserId: selectedUser?.id || null,
@@ -173,19 +185,11 @@ export const useChatList = ({
         enableUpdates,
     });
 
-    // 5. BACKGROUND SYNC
     useBackgroundSync({
         onSync: fetchUsers,
         enabled: enableBackgroundSync && enableUpdates,
         intervalMs: 60000,
     });
-
-    // 6. RESET UNREAD
-    useEffect(() => {
-        if (selectedUser?.id) {
-            resetUnreadCount(selectedUser.id);
-        }
-    }, [selectedUser?.id, resetUnreadCount]);
 
     return {
         users,

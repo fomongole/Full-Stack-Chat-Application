@@ -24,12 +24,40 @@ export const SidebarUserItem = memo(function SidebarUserItem({ user, isActive, o
         onViewProfile(user);
     };
 
+    // FIX ISSUE 2: Handle Backend Default Text for empty chats
+    const getPreviewText = () => {
+        if (user.isTyping && !isBlocked) {
+            return <span className="font-bold text-primary animate-pulse">Typing...</span>;
+        }
+
+        if (user.lastMessage) {
+            // Detect the backend "ghost" message for new chats
+            if (user.lastMessage === "Media message" && !user.lastActivity) {
+                return <span className="italic opacity-70">New conversation</span>;
+            }
+            return <span className="truncate block opacity-90">{user.lastMessage}</span>;
+        }
+
+        // Fallback status
+        return (
+            <span className="italic opacity-70">
+                {user.isPrivate
+                    ? "Private"
+                    : (isBlocked
+                            ? ""
+                            : (user.isOnline ? "Online" : formatLastSeen(user.lastSeen))
+                    )
+                }
+            </span>
+        );
+    };
+
     return (
         <button
             onClick={onClick}
             className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all duration-200 border border-transparent ${
                 isActive
-                    ? "bg-primary/10 border-primary/20" 
+                    ? "bg-primary/10 border-primary/20"
                     : "hover:bg-zinc-100 dark:hover:bg-white/5 text-zinc-700 dark:text-zinc-300 active:scale-95"
             }`}
         >
@@ -67,23 +95,9 @@ export const SidebarUserItem = memo(function SidebarUserItem({ user, isActive, o
 
                 <div className="flex justify-between items-center gap-2">
                     <div className={`text-xs truncate flex-1 ${isActive ? "text-primary/80 font-medium" : "text-zinc-500"}`}>
-                        {user.isTyping && !isBlocked ? (
-                            <span className="font-bold text-primary animate-pulse">
-                                Typing...
-                            </span>
-                        ) : (
-                            user.lastMessage ? (
-                                <span className="truncate block opacity-90">{user.lastMessage}</span>
-                            ) : (
-                                <span className="italic opacity-70">
-                                    {user.isPrivate ? "Private" : (isBlocked ? "" : (user.isOnline ? "Online" : formatLastSeen(user.lastSeen)))}
-                                </span>
-                            )
-                        )}
+                        {getPreviewText()}
                     </div>
 
-                    {/* 1. Show counter even if typing */}
-                    {/* 2. Hide counter if user is currently active in this chat */}
                     {(user.unreadCount || 0) > 0 && !isActive && (
                         <span className="text-[10px] font-bold h-5 min-w-[20px] px-1.5 flex items-center justify-center rounded-full shrink-0 bg-primary text-white shadow-sm shadow-primary/30 animate-in zoom-in duration-200">
                             {user.unreadCount! > 99 ? '99+' : user.unreadCount}

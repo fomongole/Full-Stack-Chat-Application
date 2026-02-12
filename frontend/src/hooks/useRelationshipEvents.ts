@@ -17,36 +17,34 @@ export const useRelationshipEvents = () => {
         const handleRelationshipUpdate = (data: { targetUserId: string; type: string }) => {
             // Only proceed if we have an active user and the event is about them
             if (activeUser && activeUser.id === data.targetUserId) {
+                // Create a NEW object reference to ensure React detects the change
                 const updatedUser = { ...activeUser };
 
                 switch (data.type) {
                     case 'BLOCK':
                         // I blocked them.
                         updatedUser.hasBlocked = true;
-                        // Strict Alignment: I shouldn't see their status anymore
                         updatedUser.isOnline = false;
                         updatedUser.lastSeen = undefined;
-                        // Keep their image (Frozen Snapshot logic handled by sidebar refetch)
+                        // We intentionally KEEP their image here (Frozen Snapshot logic)
                         break;
 
                     case 'UNBLOCK':
-                        // I unblocked them.
                         updatedUser.hasBlocked = false;
-                        // Status will update on next heartbeat or sidebar refresh
+                        // We don't know their real status yet, wait for next heartbeat
                         break;
 
                     case 'BLOCKED_BY':
-                        // They blocked me.
+                        // They blocked me. TOTAL BLACKOUT.
                         updatedUser.isBlockedBy = true;
-                        // Strict Alignment: Total Blackout
                         updatedUser.isOnline = false;
                         updatedUser.lastSeen = undefined;
-                        updatedUser.about = undefined; // Hide bio
-                        updatedUser.image = undefined; // Hide image (local optimistic update)
+                        updatedUser.about = undefined;
+                        // Force image removal immediately
+                        updatedUser.image = undefined;
                         break;
 
                     case 'UNBLOCKED_BY':
-                        // They unblocked me.
                         updatedUser.isBlockedBy = false;
                         break;
                 }
