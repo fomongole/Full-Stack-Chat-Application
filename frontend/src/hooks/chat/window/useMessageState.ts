@@ -1,5 +1,5 @@
 'use client';
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { Message } from '@/types';
 
 /**
@@ -7,7 +7,7 @@ import { Message } from '@/types';
  * Fixed: Removed cascading render loops and simplified state resets.
  */
 export const useMessageState = (activeUserId: string | null) => {
-    // Note: We rely on the parent component (ChatPage) to use key={activeUserId}
+    // We rely on the parent component (ChatPage) to use key={activeUserId}
     // to reset this hook's state when the user changes.
     const [chatHistory, setChatHistory] = useState<(Message & { isLocal?: boolean })[]>([]);
     const [isLoadingHistory, setIsLoadingHistory] = useState(true);

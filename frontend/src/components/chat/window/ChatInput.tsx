@@ -34,7 +34,7 @@ export function ChatInput({ value, onChange, onSend, replyTo, onCancelReply, isB
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
-        if (file.size > 10 * 1024 * 1024) { // 10MB limit
+        if (file.size > 5 * 1024 * 1024) { // 5MB limit
             toast.error("File is too large (max 10MB)");
             return;
         }
@@ -66,7 +66,7 @@ export function ChatInput({ value, onChange, onSend, replyTo, onCancelReply, isB
             }
         } else {
             onSend(e);
-            // Keep focus on the input after sending to prevent keyboard from closing
+            // Keeping focus on the input after sending to prevent keyboard from closing
             requestAnimationFrame(() => {
                 textareaRef.current?.focus();
             });

@@ -3,7 +3,6 @@ import { AppError } from '../utils/app.error';
 
 const storage = multer.memoryStorage();
 
-// Helper to validate file types
 const fileFilter = (allowedMimeTypes: RegExp) => (req: any, file: any, cb: any) => {
     if (allowedMimeTypes.test(file.mimetype)) {
         cb(null, true);
@@ -19,7 +18,7 @@ const fileFilter = (allowedMimeTypes: RegExp) => (req: any, file: any, cb: any) 
  */
 export const uploadProfile = multer({
     storage,
-    limits: { fileSize: 1 * 1024 * 1024 }, // 1MB
+    limits: { fileSize: 1024 * 1024 },
     fileFilter: fileFilter(/^image\//)
 });
 
@@ -30,6 +29,6 @@ export const uploadProfile = multer({
  */
 export const uploadChatMedia = multer({
     storage,
-    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+    limits: { fileSize: 5 * 1024 * 1024 },
     fileFilter: fileFilter(/^(image\/|video\/)/)
 });

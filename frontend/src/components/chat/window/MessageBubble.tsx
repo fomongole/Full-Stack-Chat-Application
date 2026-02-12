@@ -54,7 +54,7 @@ export const MessageBubble = memo(function MessageBubble({ message, isFromMe, is
         }
     };
 
-    // 📱 MOBILE GESTURES
+    // MOBILE GESTURES
     const handleTouchStart = (e: React.TouchEvent) => {
         touchStartRef.current = e.targetTouches[0].clientX;
 
@@ -72,7 +72,7 @@ export const MessageBubble = memo(function MessageBubble({ message, isFromMe, is
             if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
         }
 
-        // Calculate swipe direction and amount
+        // Calculates swipe direction and amount
         const delta = touchEndRef.current - touchStartRef.current;
         if (isFromMe) {
             // For own messages (right-aligned): Swipe left (negative delta)

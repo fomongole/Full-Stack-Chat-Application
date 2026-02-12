@@ -35,9 +35,7 @@ export function ChatHeader({ user, isTyping }: ChatHeaderProps) {
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
-    // ⚡ Refactored Handler
     const handleBlockAction = async () => {
-        // Simply delegate to the hook
         const success = await toggleBlockStatus(user);
 
         // Only close menus if the API call succeeded

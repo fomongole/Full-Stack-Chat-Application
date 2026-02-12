@@ -9,11 +9,6 @@ interface MediaAttachmentProps {
     isLocal?: boolean;
 }
 
-// ----------------------------------------------------------------------
-// Helper Component: Full Screen Portal
-// Moved outside to prevent re-creation on every render
-// ----------------------------------------------------------------------
-
 interface FullScreenMediaProps {
     url: string;
     type: 'IMAGE' | 'VIDEO';
@@ -48,7 +43,7 @@ function FullScreenMedia({ url, type, onClose }: FullScreenMediaProps) {
         }
     };
 
-    // Safety check: ensure we are in a browser environment before accessing document.body
+    // Ensure we are in a browser environment before accessing document.body
     if (typeof document === 'undefined') return null;
 
     return createPortal(
@@ -86,10 +81,6 @@ function FullScreenMedia({ url, type, onClose }: FullScreenMediaProps) {
         document.body
     );
 }
-
-// ----------------------------------------------------------------------
-// 📦 Main Component
-// ----------------------------------------------------------------------
 
 export function MediaAttachment({ url, type, isLocal }: MediaAttachmentProps) {
     const [isLoading, setIsLoading] = useState(true);

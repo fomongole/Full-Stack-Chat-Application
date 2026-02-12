@@ -81,7 +81,7 @@ export const blockUser = catchAsync(async (req: any, res: Response) => {
     // Real-time Update
     const io = req.app.get('io');
 
-    // Notify ME (Blocker) - so my UI updates to show "Unblock"
+    // Notify ME (Blocker) - so UI updates to show "Unblock"
     io.to(currentUserId).emit("user_relationship_update", {
         targetUserId: userIdToBlock,
         type: 'BLOCK'

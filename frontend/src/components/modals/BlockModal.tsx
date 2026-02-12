@@ -8,7 +8,7 @@ interface BlockModalProps {
     onClose: () => void;
     onConfirm: () => void;
     username: string;
-    isBlocked: boolean; // To change text based on state
+    isBlocked: boolean;
     isLoading?: boolean;
 }
 

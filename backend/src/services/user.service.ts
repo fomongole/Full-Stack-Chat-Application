@@ -69,7 +69,7 @@ export class UserService {
     }
 
     /**
-     * ENTERPRISE OPTIMIZATION: Lean Sidebar Fetcher
+     * OPTIMIZATION: Lean Sidebar Fetcher
      * 1. Uses 'select' to fetch ONLY needed columns (saves memory/bandwidth).
      * 2. Fetches only necessary relation data.
      */

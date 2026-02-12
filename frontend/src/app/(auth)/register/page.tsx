@@ -87,7 +87,7 @@ export default function RegisterPage() {
     );
 }
 
-// --- SUB-COMPONENT: Password Strength Meter ---
+// --- Password Strength Meter ---
 function PasswordStrengthMeter({ password }: { password: string }) {
     // Requirements Logic
     const requirements = [

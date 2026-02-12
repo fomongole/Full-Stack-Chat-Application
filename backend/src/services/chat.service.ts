@@ -162,7 +162,7 @@ export class ChatService {
         const messages = await prisma.message.findMany({
             where: { conversationId },
             take: limit,
-            // If cursor exists, we skip the cursor itself and fetch the messages before it
+            // If cursor exists, skip the cursor itself and fetch the messages before it
             ...(cursor && {
                 skip: 1,
                 cursor: { id: cursor },

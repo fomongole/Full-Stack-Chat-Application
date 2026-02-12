@@ -10,7 +10,6 @@ import { loginSchema, type LoginValues } from '@/validators/auth.validator';
 export const useLoginForm = () => {
     const router = useRouter();
     const setAuth = useAuthStore((state) => state.setAuth);
-    // state to lock UI during page transition
     const [isRedirecting, setIsRedirecting] = useState(false);
 
     const form = useForm<LoginValues>({
@@ -22,7 +21,6 @@ export const useLoginForm = () => {
     });
 
     const onSubmit = async (data: LoginValues) => {
-        //the promise variable
         const loginPromise = api.post('/auth/login', data);
 
         toast.promise(loginPromise, {
@@ -37,7 +35,6 @@ export const useLoginForm = () => {
 
         try {
             // Awaiting the promise
-            // This forces isSubmitting to stay true until the API responds.
             await loginPromise;
 
             // If successful, set redirecting state BEFORE navigation

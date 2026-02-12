@@ -22,7 +22,6 @@ export default function UserProfileModal({ isOpen, onClose, user }: UserProfileM
     if (!isOpen || !user) return null;
 
     const handleConfirmBlock = async () => {
-        // Delegate the logic to the hook
         const success = await toggleBlockStatus(user);
 
         if (success) {

@@ -110,7 +110,6 @@ export const registerChatHandlers = (io: Server, socket: Socket) => {
     });
 
     const handleMarkAsRead = catchAsync(async (data: { conversationId: string, recipientId: string }) => {
-        // Fire and forget DB update (don't block the socket loop)
         await chatService.markMessagesAsRead(data.conversationId, user.id);
 
         const me = await prisma.user.findUnique({ where: { id: user.id }, select: { isPrivate: true } });

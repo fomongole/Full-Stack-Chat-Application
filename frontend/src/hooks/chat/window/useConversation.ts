@@ -1,10 +1,10 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useSocket } from '@/hooks/useSocket';
 import { useAuthStore } from '@/store/useAuthStore';
-import {Message, User} from '@/types';
+import { Message, User } from '@/types';
 import { useMessageState } from './useMessageState';
-import { useSocketEmitters } from './useSocketEmitters'; // New import
-import { useSocketListeners } from './useSocketListeners'; // New import
+import { useSocketEmitters } from './useSocketEmitters';
+import { useSocketListeners } from './useSocketListeners';
 import { useMessageActions } from './useMessageActions';
 import { useScrollBehavior } from './useScrollBehavior';
 
@@ -50,69 +50,54 @@ export const useConversation = (activeUser: User | null) => {
         emitStopTyping,
     } = useSocketEmitters({ socket });
 
+    // --- SYNC REFS FOR EVENT HANDLERS ---
+    // We use refs so we can read the LATEST values inside the callback
+    // without forcing the callback to be recreated when these values change.
+    // This prevents the socket listeners from detaching/reattaching on every render.
+    const activeUserIdRef = useRef(activeUserId);
+    const conversationIdRef = useRef(conversationId);
+
+    useEffect(() => {
+        activeUserIdRef.current = activeUserId;
+    }, [activeUserId]);
+
+    useEffect(() => {
+        conversationIdRef.current = conversationId;
+    }, [conversationId]);
+
     // Define stable callbacks that can depend on emitters
-    // const onConversationJoined = useCallback(
-    //     (data: { conversationId: string }) => {
-    //         handleConversationJoined(data);
-    //         // Mark as read on join
-    //         if (activeUserId) {
-    //             markAsRead(data.conversationId, activeUserId);
-    //         }
-    //     },
-    //     [handleConversationJoined, markAsRead, activeUserId]
-    // );
+    // wrapped in useCallback to prevent re-subscription loops in useSocketListeners
+    const onConversationJoined = useCallback(
+        (data: { conversationId: string }) => {
+            handleConversationJoined(data);
+            // Access ref to get current activeUserId without breaking stability
+            if (activeUserIdRef.current) {
+                markAsRead(data.conversationId, activeUserIdRef.current);
+            }
+        },
+        [handleConversationJoined, markAsRead]
+    );
 
-    // Remove useCallback and the dependency array entirely
-    const onConversationJoined = (data: { conversationId: string }) => {
-        handleConversationJoined(data);
-        if (activeUser?.id) {
-            markAsRead(data.conversationId, activeUser.id);
-        }
-    };
+    const onMessageReceived = useCallback(
+        (message: Message) => {
+            handleMessageReceived(message);
 
-    // const onMessageReceived = useCallback(
-    //     (message) => {
-    //         handleMessageReceived(message);
-    //         // Stop typing indicator
-    //         if (message.authorId === activeUserId) {
-    //             setIsRemoteTyping(false);
-    //         }
-    //         // Mark as read if visible and in current conversation
-    //         if (
-    //             document.visibilityState === 'visible' &&
-    //             message.conversationId === conversationId &&
-    //             activeUserId
-    //         ) {
-    //             markAsRead(message.conversationId, activeUserId);
-    //         }
-    //     },
-    //     [
-    //         handleMessageReceived,
-    //         activeUserId,
-    //         conversationId,
-    //         setIsRemoteTyping,
-    //         markAsRead,
-    //     ]
-    // );
+            // Access ref to check typing status
+            if (message.authorId === activeUserIdRef.current) {
+                setIsRemoteTyping(false);
+            }
 
-    // 2. Remove useCallback and add the type to the parameter
-    const onMessageReceived = (message: Message) => {
-        handleMessageReceived(message);
-
-        // Stop typing indicator
-        if (message.authorId === activeUserId) {
-            setIsRemoteTyping(false);
-        }
-
-        // Mark as read if visible and in current conversation
-        if (
-            document.visibilityState === 'visible' &&
-            message.conversationId === conversationId &&
-            activeUserId
-        ) {
-            markAsRead(message.conversationId, activeUserId);
-        }
-    };
+            // Access ref to check visibility/read status
+            if (
+                document.visibilityState === 'visible' &&
+                message.conversationId === conversationIdRef.current &&
+                activeUserIdRef.current
+            ) {
+                markAsRead(message.conversationId, activeUserIdRef.current);
+            }
+        },
+        [handleMessageReceived, setIsRemoteTyping, markAsRead]
+    );
 
     // 2. SOCKET EVENT ORCHESTRATION (split into emitters and listeners)
     useSocketListeners({
