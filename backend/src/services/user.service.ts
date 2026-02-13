@@ -193,7 +193,6 @@ export class UserService {
                 finalAbout = null;
             }
 
-            // MESSAGE PREVIEW SAFTEY
             let previewText = "New conversation"; // Fallback for newly created empty chats
 
             if (lastMsg) {
