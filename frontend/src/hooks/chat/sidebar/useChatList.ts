@@ -78,11 +78,12 @@ export const useChatList = ({
 
     // 2. API CALLS
     const { fetchUsers } = useUserApi({
-        onUsersLoaded: handleUsersLoaded, // <-- Used the new safe handler here
+        onUsersLoaded: handleUsersLoaded,
         onError: () => setError("Failed to load conversations"),
         startLoading,
         stopLoading,
-        shouldShowInitialLoader: usersRef.current.length === 0,
+        // Use rawUsers state instead of usersRef to adhere to strict render rules
+        shouldShowInitialLoader: rawUsers.length === 0,
     });
 
     // 3. SOCKET EVENT HANDLERS

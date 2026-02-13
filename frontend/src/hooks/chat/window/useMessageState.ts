@@ -1,5 +1,5 @@
 'use client';
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { Message } from '@/types';
 
 /**
@@ -14,17 +14,18 @@ export const useMessageState = (activeUserId: string | null) => {
     const [conversationId, setConversationId] = useState<string | null>(null);
     const [isRemoteTyping, setIsRemoteTyping] = useState(false);
 
-    // Prevent state leakage across different user chats.
-    // Ensure all internal state wipes completely the moment the active user changes.
-    useEffect(() => {
+    // Prevent state leakage across different user chats WITHOUT cascading effects.
+    // If the active user ID changes, we wipe everything cleanly during the render phase.
+    const [prevActiveUserId, setPrevActiveUserId] = useState<string | null>(activeUserId);
+    if (activeUserId !== prevActiveUserId) {
+        setPrevActiveUserId(activeUserId);
         setChatHistory([]);
         setIsLoadingHistory(true);
         setHasMore(false);
         setIsLoadingMore(false);
         setConversationId(null);
         setIsRemoteTyping(false);
-    }, [activeUserId]);
-    //
+    }
 
     // Initial load handler
     const handleHistoryLoaded = useCallback(

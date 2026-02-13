@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { Socket } from 'socket.io-client';
 import { v4 as uuidv4 } from 'uuid';
 import { Message, User } from '@/types';
@@ -39,11 +39,15 @@ export const useMessageActions = ({
     const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const lastTypingEmitRef = useRef<number>(0);
 
-    // Prevent input state leakage across different user chats.
-    useEffect(() => {
+    // Prevent input state leakage across different user chats WITHOUT using useEffect.
+    // Setting state directly during render when an ID changes allows React to immediately
+    // throw away the stale render and restart with clean state, avoiding cascading renders.
+    const [prevUserId, setPrevUserId] = useState<string | undefined>(activeUser?.id);
+    if (activeUser?.id !== prevUserId) {
+        setPrevUserId(activeUser?.id);
         setMessage('');
         setReplyTo(null);
-    }, [activeUser?.id, conversationId]);
+    }
 
     /**
      * Handle typing with debounced socket emission
