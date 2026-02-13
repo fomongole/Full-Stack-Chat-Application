@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { Socket } from 'socket.io-client';
 import { v4 as uuidv4 } from 'uuid';
 import { Message, User } from '@/types';
@@ -38,6 +38,12 @@ export const useMessageActions = ({
 
     const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const lastTypingEmitRef = useRef<number>(0);
+
+    // Prevent input state leakage across different user chats.
+    useEffect(() => {
+        setMessage('');
+        setReplyTo(null);
+    }, [activeUser?.id, conversationId]);
 
     /**
      * Handle typing with debounced socket emission

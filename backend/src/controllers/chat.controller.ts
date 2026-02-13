@@ -61,14 +61,15 @@ export const registerChatHandlers = (io: Server, socket: Socket) => {
         conversationId: string,
         message: string,
         replyToId?: string,
-        recipientId: string,
+        recipientId: string, // <-- We receive this, but we WILL NOT trust it for routing
         attachmentUrl?: string,
         messageType?: 'TEXT' | 'IMAGE' | 'VIDEO'
     }) => {
         try {
             const msgType = data.messageType || 'TEXT';
 
-            const savedMessage = await chatService.processPrivateMessage({
+            // Destructure the true, DB-verified recipientId
+            const { message: savedMessage, recipientId: secureRecipientId } = await chatService.processPrivateMessage({
                 userId: user.id,
                 conversationId: data.conversationId,
                 content: data.message,
@@ -95,12 +96,13 @@ export const registerChatHandlers = (io: Server, socket: Socket) => {
 
             const senderNotification = {
                 conversationId: data.conversationId,
-                senderId: data.recipientId,
+                senderId: secureRecipientId, // The true ID of the person they are chatting with
                 message: previewText.startsWith('You:') ? previewText : `You: ${previewText}`,
                 isOwn: true
             };
 
-            io.to(data.recipientId).emit("new_message_notification", recipientNotification);
+            // Route using secureRecipientId, discarding the client's payload data.recipientId
+            io.to(secureRecipientId).emit("new_message_notification", recipientNotification);
             io.to(user.id).emit("new_message_notification", senderNotification);
 
         } catch (error: any) {

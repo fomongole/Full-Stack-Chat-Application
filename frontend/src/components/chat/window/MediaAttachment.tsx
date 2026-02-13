@@ -7,6 +7,7 @@ interface MediaAttachmentProps {
     url: string;
     type: 'IMAGE' | 'VIDEO';
     isLocal?: boolean;
+    onLoad?: () => void; // ---> FIX: Accept onLoad prop
 }
 
 interface FullScreenMediaProps {
@@ -82,7 +83,7 @@ function FullScreenMedia({ url, type, onClose }: FullScreenMediaProps) {
     );
 }
 
-export function MediaAttachment({ url, type, isLocal }: MediaAttachmentProps) {
+export function MediaAttachment({ url, type, isLocal, onLoad }: MediaAttachmentProps) {
     const [isLoading, setIsLoading] = useState(true);
     const [isExpanded, setIsExpanded] = useState(false);
 
@@ -93,7 +94,10 @@ export function MediaAttachment({ url, type, isLocal }: MediaAttachmentProps) {
                     <video
                         src={url}
                         className="w-full h-full object-cover opacity-80"
-                        onLoadedData={() => setIsLoading(false)}
+                        onLoadedData={() => {
+                            setIsLoading(false);
+                            if (onLoad) onLoad(); // ---> FIX: Trigger re-scroll
+                        }}
                     />
                     <div
                         onClick={(e) => { e.stopPropagation(); setIsExpanded(true); }}
@@ -127,7 +131,10 @@ export function MediaAttachment({ url, type, isLocal }: MediaAttachmentProps) {
                     src={url}
                     alt="Attachment"
                     className={`w-full h-auto max-h-[400px] object-cover transition-all duration-500 ${isLoading ? 'scale-110 blur-xl grayscale' : 'scale-100'}`}
-                    onLoad={() => setIsLoading(false)}
+                    onLoad={() => {
+                        setIsLoading(false);
+                        if (onLoad) onLoad(); // ---> FIX: Trigger re-scroll
+                    }}
                 />
                 {isLocal && (
                     <div className="absolute inset-0 bg-black/40 flex items-center justify-center backdrop-blur-[2px]">

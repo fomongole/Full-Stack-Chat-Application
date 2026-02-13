@@ -15,9 +15,10 @@ interface MessageBubbleProps {
     isLastInGroup: boolean;
     onReply: (msg: Message) => void;
     onDelete: (id: string) => void;
+    onMediaLoad?: () => void; // ---> FIX: Added optional prop
 }
 
-export const MessageBubble = memo(function MessageBubble({ message, isFromMe, isFirstInGroup, isLastInGroup, onReply, onDelete }: MessageBubbleProps) {
+export const MessageBubble = memo(function MessageBubble({ message, isFromMe, isFirstInGroup, isLastInGroup, onReply, onDelete, onMediaLoad }: MessageBubbleProps) {
     const canDelete = isFromMe && !message.isDeleted && !message.isLocal;
 
     // UI States
@@ -210,6 +211,7 @@ export const MessageBubble = memo(function MessageBubble({ message, isFromMe, is
                                 url={message.attachmentUrl}
                                 type={message.messageType as 'IMAGE' | 'VIDEO'}
                                 isLocal={message.isLocal}
+                                onLoad={onMediaLoad} // ---> FIX: Pass to media component
                             />
                         </div>
                     )}

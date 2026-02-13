@@ -72,6 +72,13 @@ io.on("connection", async (socket) => {
         console.log(`🔌 Disconnected: ${userId} (${socket.id})`);
 
         try {
+            // Multi-tab presence check
+            // Only mark as offline if the user has NO other active socket connections (e.g., another tab/device open)
+            const activeSockets = await io.in(userId).fetchSockets();
+            if (activeSockets.length > 0) {
+                return; // They are still active on another tab!
+            }
+
             const lastSeen = new Date();
 
             // Update DB status to OFFLINE with timestamp

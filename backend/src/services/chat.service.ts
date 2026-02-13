@@ -61,6 +61,10 @@ export class ChatService {
 
         const recipient = participants.find(p => p.userId !== userId)?.user;
 
+        // Ensure recipient exists and we capture their true ID securely from DB
+        if (!recipient) throw new AppError("Recipient not found in conversation", 404);
+        //
+
         // 2. BLOCK CHECK (Bidirectional)
         if (recipient) {
             const blockExists = await db.query.blocks.findFirst({
@@ -99,7 +103,11 @@ export class ChatService {
                 .set({ updatedAt: new Date() })
                 .where(eq(conversations.id, conversationId));
 
-            return this.formatMessage(fullMessage);
+            // Return the structured object containing the verified recipientId
+            return {
+                message: this.formatMessage(fullMessage),
+                recipientId: recipient.id
+            };
         });
     }
 

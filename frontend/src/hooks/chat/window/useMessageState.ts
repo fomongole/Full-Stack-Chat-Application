@@ -1,20 +1,30 @@
 'use client';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Message } from '@/types';
 
 /**
  * Pure message state management hook.
- * Fixed: Removed cascading render loops and simplified state resets.
+ * Removed cascading render loops and simplified state resets.
  */
 export const useMessageState = (activeUserId: string | null) => {
-    // We rely on the parent component (ChatPage) to use key={activeUserId}
-    // to reset this hook's state when the user changes.
     const [chatHistory, setChatHistory] = useState<(Message & { isLocal?: boolean })[]>([]);
     const [isLoadingHistory, setIsLoadingHistory] = useState(true);
     const [hasMore, setHasMore] = useState(false);
     const [isLoadingMore, setIsLoadingMore] = useState(false);
     const [conversationId, setConversationId] = useState<string | null>(null);
     const [isRemoteTyping, setIsRemoteTyping] = useState(false);
+
+    // Prevent state leakage across different user chats.
+    // Ensure all internal state wipes completely the moment the active user changes.
+    useEffect(() => {
+        setChatHistory([]);
+        setIsLoadingHistory(true);
+        setHasMore(false);
+        setIsLoadingMore(false);
+        setConversationId(null);
+        setIsRemoteTyping(false);
+    }, [activeUserId]);
+    //
 
     // Initial load handler
     const handleHistoryLoaded = useCallback(

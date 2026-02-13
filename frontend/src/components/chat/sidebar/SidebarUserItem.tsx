@@ -24,7 +24,7 @@ export const SidebarUserItem = memo(function SidebarUserItem({ user, isActive, o
         onViewProfile(user);
     };
 
-    // FIX ISSUE 2: Handle Backend Default Text for empty chats
+    //  Handle Backend Default Text for empty chats
     const getPreviewText = () => {
         if (user.isTyping && !isBlocked) {
             return <span className="font-bold text-primary animate-pulse">Typing...</span>;

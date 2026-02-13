@@ -1,4 +1,4 @@
-import { eq, ne, and, or, desc, like } from 'drizzle-orm';
+import { eq, ne, and, or, desc, like, sql } from 'drizzle-orm';
 import { db } from '../config/db';
 import { users, blocks, conversationParticipants, conversations, messages } from '../db/schema';
 import cloudinary from '../config/cloudinary';
@@ -128,6 +128,23 @@ export class UserService {
             )
         });
 
+        // Fetch Real Unread Counts grouped by conversation
+        const unreadCountsRaw = await db.select({
+            conversationId: messages.conversationId,
+            count: sql<number>`count(*)::int`
+        })
+            .from(messages)
+            .where(
+                and(
+                    eq(messages.isRead, false),
+                    ne(messages.authorId, currentUserId)
+                )
+            )
+            .groupBy(messages.conversationId);
+
+        // Map for O(1) lookups
+        const unreadMap = new Map(unreadCountsRaw.map(u => [u.conversationId, u.count]));
+
         return userConversations.map(cp => {
             const conv = cp.conversation;
             if (!conv) return null;
@@ -138,7 +155,9 @@ export class UserService {
 
             const user = otherParticipant.user;
             const lastMsg = conv.messages[0];
-            const unreadCount = 0; // TODO: Implement real unread count logic if needed
+
+            // Apply Real Unread Count instead of hardcoding 0
+            const unreadCount = unreadMap.get(conv.id) || 0;
 
             // --- IN-MEMORY RELATIONSHIP MAPPING ---
             // Faster than SQL joins for small datasets (sidebar lists)
@@ -174,12 +193,16 @@ export class UserService {
                 finalAbout = null;
             }
 
-            // --- MESSAGE PREVIEW ---
-            let previewText = lastMsg?.content || "Media message";
-            if (lastMsg?.messageType === 'IMAGE') previewText = "📷 Image";
-            if (lastMsg?.messageType === 'VIDEO') previewText = "🎥 Video";
-            if (lastMsg && lastMsg.authorId === currentUserId) previewText = `You: ${previewText}`;
-            if (lastMsg && lastMsg.isDeleted) previewText = "Message deleted";
+            // MESSAGE PREVIEW SAFTEY
+            let previewText = "New conversation"; // Fallback for newly created empty chats
+
+            if (lastMsg) {
+                previewText = lastMsg.content || "Media message";
+                if (lastMsg.messageType === 'IMAGE') previewText = lastMsg.content ? `📷 ${lastMsg.content}` : "📷 Image";
+                if (lastMsg.messageType === 'VIDEO') previewText = lastMsg.content ? `🎥 ${lastMsg.content}` : "🎥 Video";
+                if (lastMsg.authorId === currentUserId) previewText = `You: ${previewText}`;
+                if (lastMsg.isDeleted) previewText = "Message deleted";
+            }
 
             return {
                 id: user.id,

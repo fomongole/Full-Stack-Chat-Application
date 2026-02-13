@@ -81,7 +81,17 @@ export const useUserState = () => {
      */
     const updateUser = useCallback((userId: string, updates: Partial<User>) => {
         setRawUsers((prev) =>
-            prev.map((user) => (user.id === userId ? { ...user, ...updates } : user))
+            prev.map((user) => {
+                if (user.id === userId) {
+                    // Protect unreadCount from being zeroed out by generic updates
+                    const newUnreadCount = updates.unreadCount !== undefined
+                        ? Math.max(updates.unreadCount, user.unreadCount || 0)
+                        : user.unreadCount;
+
+                    return { ...user, ...updates, unreadCount: newUnreadCount };
+                }
+                return user;
+            })
         );
     }, []);
 
