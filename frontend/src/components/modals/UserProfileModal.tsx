@@ -30,6 +30,10 @@ export default function UserProfileModal({ isOpen, onClose, user }: UserProfileM
         }
     };
 
+    // Ensure we do not leak online presence if the user is private or blocked.
+    const isBlocked = user.hasBlocked || user.isBlockedBy;
+    const canShowStatus = !user.isPrivate && !isBlocked;
+
     return (
         <>
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
@@ -56,7 +60,8 @@ export default function UserProfileModal({ isOpen, onClose, user }: UserProfileM
                         </div>
 
                         {/* Status Dot */}
-                        {user.isOnline && (
+                        {/* ---> FIX: Respect privacy guard <--- */}
+                        {user.isOnline && canShowStatus && (
                             <div className="absolute bottom-1 right-1 p-1 bg-white dark:bg-zinc-950 rounded-full">
                                 <div className="w-5 h-5 bg-green-500 rounded-full animate-pulse border border-white dark:border-zinc-950"></div>
                             </div>
@@ -66,11 +71,16 @@ export default function UserProfileModal({ isOpen, onClose, user }: UserProfileM
                     <h2 className="text-2xl font-bold text-zinc-900 dark:text-zinc-50 mb-1">{user.username}</h2>
 
                     {/* Status Text */}
+                    {/* ---> FIX: Respect privacy guard and fallback gracefully <--- */}
                     <p className="text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-6 flex items-center gap-2">
-                        {user.isOnline ? (
-                            <span className="text-green-600 dark:text-green-500 bg-green-50 dark:bg-green-500/10 px-2 py-0.5 rounded-full text-xs">Active Now</span>
+                        {canShowStatus ? (
+                            user.isOnline ? (
+                                <span className="text-green-600 dark:text-green-500 bg-green-50 dark:bg-green-500/10 px-2 py-0.5 rounded-full text-xs">Active Now</span>
+                            ) : (
+                                <span>Last seen {formatLastSeen(user.lastSeen)}</span>
+                            )
                         ) : (
-                            <span>Last seen {formatLastSeen(user.lastSeen)}</span>
+                            <span className="italic text-xs opacity-70">Status hidden</span>
                         )}
                     </p>
 
