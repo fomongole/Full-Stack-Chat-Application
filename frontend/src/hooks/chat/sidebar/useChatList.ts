@@ -53,7 +53,6 @@ export const useChatList = ({
         usersRef.current = rawUsers;
     }, [rawUsers]);
 
-    // ---> Handle API users loaded safely
     const handleUsersLoaded = useCallback((fetchedUsers: User[]) => {
         //Preserve local unreadCount to prevent UI flashing if API is lagging
         const mergedUsers = fetchedUsers.map(apiUser => {
@@ -82,7 +81,7 @@ export const useChatList = ({
         onError: () => setError("Failed to load conversations"),
         startLoading,
         stopLoading,
-        // Use rawUsers state instead of usersRef to adhere to strict render rules
+        // Using rawUsers state instead of usersRef to adhere to strict render rules
         shouldShowInitialLoader: rawUsers.length === 0,
     });
 

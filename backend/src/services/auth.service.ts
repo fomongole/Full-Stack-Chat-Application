@@ -97,7 +97,10 @@ export class AuthService {
             // 3. Generate a NEW Access Token
             const newAccessToken = generateAccessToken({ id: user.id, username: user.username });
 
-            return { accessToken: newAccessToken, user };
+            // Generate a NEW Refresh Token to reset the 7-day clock
+            const newRefreshToken = generateRefreshToken({ id: user.id, username: user.username });
+
+            return { accessToken: newAccessToken, refreshToken: newRefreshToken, user };
         } catch (error) {
             throw new AppError('Invalid or expired refresh token', 401);
         }

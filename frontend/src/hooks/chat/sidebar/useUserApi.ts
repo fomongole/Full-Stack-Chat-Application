@@ -41,7 +41,7 @@ export const useUserApi = ({
             hasLoadedRef.current = true;
         } catch (error) {
             console.error('Failed to load users:', error);
-            stopLoading(); // ✅ FIX: Ensure loading state is turned off on error
+            stopLoading();
             onError?.(error);
         }
     }, [onUsersLoaded, onError, startLoading, stopLoading, shouldShowInitialLoader]);

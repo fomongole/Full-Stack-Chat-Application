@@ -60,7 +60,7 @@ export default function UserProfileModal({ isOpen, onClose, user }: UserProfileM
                         </div>
 
                         {/* Status Dot */}
-                        {/* ---> FIX: Respect privacy guard <--- */}
+                        {/* Respect privacy guard */}
                         {user.isOnline && canShowStatus && (
                             <div className="absolute bottom-1 right-1 p-1 bg-white dark:bg-zinc-950 rounded-full">
                                 <div className="w-5 h-5 bg-green-500 rounded-full animate-pulse border border-white dark:border-zinc-950"></div>
@@ -71,7 +71,7 @@ export default function UserProfileModal({ isOpen, onClose, user }: UserProfileM
                     <h2 className="text-2xl font-bold text-zinc-900 dark:text-zinc-50 mb-1">{user.username}</h2>
 
                     {/* Status Text */}
-                    {/* ---> FIX: Respect privacy guard and fallback gracefully <--- */}
+                    {/* Respect privacy guard and fallback gracefully */}
                     <p className="text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-6 flex items-center gap-2">
                         {canShowStatus ? (
                             user.isOnline ? (
